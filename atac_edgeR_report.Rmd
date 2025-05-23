@@ -584,10 +584,8 @@ If you prefer viewing the data in [IGV](https://www.igv.org), click the **[Downl
 
 Once the folder is downloaded, unzip it, go to [www.igv.org](https://www.igv.org) in your browser, then select **"Tracks" > "Local File"** and select all files in the downloaded folder.
 
-```{r make bigbed,eval = !params$test_mode}
+```{r make bigbed, eval = !params$test_mode}
 results_list <- convert_all_chr_to_ucsc(results_list)
-
-library(rtracklayer)
 
 mmu_chrom_sizes="mm10.chrom.sizes"
 hsa_chrom_sizes="hg38.chrom.sizes"

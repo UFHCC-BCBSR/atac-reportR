@@ -716,19 +716,22 @@ generate_kegg_enrichment_plot_atac <- function(gene_lists, de_results_df, univer
 
 write_bigbed_de_peaks <- function(results_list, report_params, chrom_sizes_file, bedToBigBed_path) {
   public_web_dir <- "/orange/cancercenter-dept/web/public/BCB-SR/trackhubs"
-
+  
   for (contrast in names(results_list)) {
     contrast_clean <- gsub("\\.", "-", contrast)
-    contrast_clean <- gsub("_", "-", contrast)
+    contrast_clean <- gsub("_", "-", contrast_clean)
     contrast_clean <- gsub("-vs-", "_vs_", contrast_clean)
+    
     trackhub_dir <- file.path(public_web_dir, report_params$seqID, contrast_clean)
     if (!dir.exists(trackhub_dir)) dir.create(trackhub_dir, recursive = TRUE)
+    
     result_table <- results_list[[contrast]]$table
-    de_table <- subset(result_table, FDR < 0.05 & abs(logFC) > 1 & logCPM > 2 & !Gene.Name =="")
+    de_table <- subset(result_table, FDR < 0.05 & abs(logFC) > 1 & logCPM > 2 & Gene.Name != "")
+    
     # Read valid UCSC chromosome names
     valid_chroms <- read.table(chrom_sizes_file, header = FALSE, stringsAsFactors = FALSE)[[1]]
     
-    # Filter rows to only valid chromosomes
+    # Filter to valid chromosomes
     de_table <- de_table[de_table$Chr %in% valid_chroms, ]
     
     if (nrow(de_table) == 0) next
@@ -744,34 +747,33 @@ write_bigbed_de_peaks <- function(results_list, report_params, chrom_sizes_file,
       de_table$Gene.Name
     )
     
-    
-    gr <- GRanges(
-      seqnames = de_table$Chr,
-      ranges   = IRanges(start = de_table$Start, end = de_table$End),
-      strand   = de_table$Strand,
-      score    = as.integer(de_table$Peak.Score),
-      name     = peak_names
+    # Construct BED dataframe
+    bed_df <- data.frame(
+      chrom      = de_table$Chr,
+      chromStart = de_table$Start - 1,  # BED is 0-based
+      chromEnd   = de_table$End,
+      name       = peak_names,
+      score      = if ("Peak.Score" %in% colnames(de_table)) as.integer(de_table$Peak.Score) else 0L,
+      strand     = de_table$Strand,
+      stringsAsFactors = FALSE
     )
     
-    # Write to BED first
     bed_file <- file.path(trackhub_dir, paste0(contrast_clean, "_DA_peaks.bed"))
+    write.table(bed_df, bed_file, sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
     
-    # Write unsorted BED
-    export(gr, bed_file, format = "BED")
-    
-    # Sort BED (required by bedToBigBed)
+    # Sort BED
     sort_cmd <- sprintf("LC_COLLATE=C sort -k1,1 -k2,2n %s -o %s", bed_file, bed_file)
     system(sort_cmd)
-    bb_file <- file.path(trackhub_dir, paste0(contrast_clean, "_DA_peaks.bb"))
     
     # Convert to BigBed
+    bb_file <- file.path(trackhub_dir, paste0(contrast_clean, "_DA_peaks.bb"))
     cmd <- sprintf("%s %s %s %s", bedToBigBed_path, bed_file, chrom_sizes_file, bb_file)
     system(cmd, intern = TRUE)
-    file.remove(bed_file)
-
     
+    file.remove(bed_file)
   }
 }
+
 find_variable_for_contrast <- function(group1, group2, metadata) {
   for (var in colnames(metadata)) {
     vals <- make.names(unique(as.character(metadata[[var]])))
