@@ -1,0 +1,1080 @@
+---
+title: "`r params$report_title`"
+subtitle: "Report Prepared by UFHCC BCB-SR"
+output: 
+  html_document:
+    toc: true
+    keep_md: false
+    toc_float: false
+    number_sections: true
+    theme: default
+    highlight: tango
+    code_folding: none
+params:
+  report_title: "BCB-SR RNA-seq Report"  # default fallback
+  params_file: 
+  test_mode: false  
+pandoc_args: 
+  - "+RTS" 
+  - "-K16000m"
+  - "-RTS"
+date: "`r format(Sys.time(), '%m/%d/%y')`"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE, fig.align="center")
+library(DESeq2)
+library(pheatmap)
+library(ggplot2)
+library(GenomicRanges)
+library(dplyr)
+library(tibble)
+library(edgeR)
+library(limma)
+library(htmltools)
+library(knitr)
+library(DT)
+library(ggfortify)
+library(scales)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(htmltools)
+source("ATACseq_report_funcs.R", local = knitr::knit_global())
+library(downloadthis)
+select <- dplyr::select
+```
+
+```{r parse params}
+if (exists("params") && !is.null(params$params_file)) {
+  report_params <- parse_params(params$params_file)
+} else {
+  #report_params <- parse_params("/blue/cancercenter-dept/PIPELINES/REPORTING/atacseq_report_module/param_files/testing/NS4167_Male_GoodSamples_params.txt")
+  stop("params$params_file is not available. This Rmd must be run with a params file.")
+}
+```
+
+# Project Summary
+
+**PI**: `r report_params$PI`
+
+**Institution**: `r report_params$Institution`
+
+**Department**: `r report_params$Department`
+
+**Study Contact**: `r report_params$Study_Contact`
+
+**Project Title**: `r report_params$Project_Title`
+
+**Study Summary**: `r report_params$Study_Summary`
+
+**Sample type(s)**: `r report_params$Sample_Types`
+
+**Organism**: `r report_params$Organism`
+
+**Analysis goal(s)**: `r report_params$Analysis_Goals`
+
+**Report-prepared-by**:  
+  - `r report_params$Report_Prepared_By`
+  
+**Report-reviewed-by**:  
+  - `r report_params$Report_Reviewed_By`
+
+# Data Downloads
+
+## Download Raw Sequencing Data  
+
+Below is a link to download the raw sequencing files. These files are very large (>150GB); download only when needed. Note that you **must be logged into your UF dropbox account** for this link to work.
+
+```{r download raw data, echo=FALSE, results="asis"}
+url <- report_params$raw_seq_URL
+
+if (url == "") {
+  cat("<p><em>This file was not included in this report.</em></p>")
+} else {
+  cat(sprintf('<a href="%s" class="btn btn-primary" role="button" download>Download Raw Sequence Files</a>', url))
+}
+```
+
+## Download Sequencing Data Quality Control Summary
+
+MultiQC is a visualisation tool that generates a single HTML report summarising all samples in your project. Pipeline QC results are visualized in the report which collates pipeline QC from FastQC, TrimGalore, samtools flagstat, samtools idxstats, samtools stats, picard CollectMultipleMetrics, picard MarkDuplicates, Preseq, deepTools plotProfile, deepTools plotFingerprint and featureCounts.
+
+
+```{r download multiqc, echo=FALSE, results="asis"}
+url <- report_params$multiqc_url
+
+if (url == "") {
+  cat("<p><em>This file was not included in this report.</em></p>")
+} else {
+  cat(sprintf('<a href="%s" class="btn btn-primary" role="button" download>Download MultiQC Report</a>', url))
+}
+```
+
+```{r load data}
+# Load target genome data
+load(paste0(report_params$nfcore_output_dir, "/bowtie2/merged_library/macs2/broad_peak/consensus/deseq2/consensus_peaks.mLb.clN.dds.RData"))
+targetGenome_dds <- dds
+rm(dds)
+# Extract counts immediately
+targetGenome_counts <- assay(targetGenome_dds, "counts")
+
+# Load  sample_info
+sample_info <- read.csv(report_params$sample_sheet, stringsAsFactors = FALSE)
+
+# Remove the technical replicate suffix added by nf-core
+sample_info$sample <- gsub("_T\\d+", "", sample_info$sample)
+
+# Remove fastq-related columns and keep unique rows
+sample_info <- sample_info %>%
+  select(-starts_with("fastq")) %>%
+  distinct()
+
+# If sample_id column is missing, create it from sample
+if (!"sample_id" %in% colnames(sample_info)) {
+  sample_info$sample_id <- sample_info$sample
+}
+
+# Match and align sample_info to dds$sample. This will definitely match if the sample_sheet is based on what was used for nf-core.
+sample_info_matched <- sample_info[match(targetGenome_dds$sample, sample_info$sample), ]
+
+# Sanity check with custom error
+if (!identical(sample_info_matched$sample, as.character(targetGenome_dds$sample))) {
+  stop('Sample names in the nf-core dds object do not match those in the sample sheet. Ensure the "sample" column has not been changed. Use "sample_id" for custom labels.')
+}
+
+# Add all non-duplicate, non-sample_id columns to colData
+meta_cols <- setdiff(colnames(sample_info_matched), c("sample", colnames(colData(targetGenome_dds))))
+colData(targetGenome_dds)[meta_cols] <- sample_info_matched[meta_cols]
+
+# Conditionally load spike-in data if directory is provided
+if (!is.null(report_params$nfcore_spikein_dir) && report_params$nfcore_spikein_dir != "") {
+  load(paste0(report_params$nfcore_spikein_dir, "/bowtie2/merged_library/macs2/broad_peak/consensus/deseq2/consensus_peaks.mLb.clN.dds.RData"))
+  spikeIn_dds <- dds
+  rm(dds)
+}
+```
+
+# Data Pre-processing and Normalization
+
+## Peak Calling and Consensus Peakset Generation
+
+```{r nfcore_description, echo=FALSE, results='asis'}
+if (exists("spikeIn_dds")) {
+  atacseq_text <- "Raw ATAC-seq data were processed using the nf-core/atacseq 2.1.2 [^2] ([https://nf-co.re/atacseq/2.1.2/](https://nf-co.re/atacseq/2.1.2/)) pipeline for both the primary human genome and a *Drosophila melanogaster* spike-in genome. Peak calling was performed with MACS2 in broad peak mode for each individual sample. A consensus peakset was generated across all samples by merging all individual peak sets using bedtools merge, without filtering for reproducibility or requiring presence in a minimum number of replicates. This approach produces a union of all detected peaks across all samples. Read counts were first quantified over the global consensus peakset, which was then filtered per contrast to retain only peaks present in the relevant samples for downstream differential accessibility analysis."
+} else {
+  atacseq_text <- "Raw ATAC-seq data were processed using the nf-core/atacseq 2.1.2 [^2] ([https://nf-co.re/atacseq/2.1.2/](https://nf-co.re/atacseq/2.1.2/)) pipeline. Peak calling was performed with MACS2 in broad peak mode for each individual sample. A consensus peakset was generated across all samples by merging all individual peak sets using bedtools merge, without filtering for reproducibility or requiring presence in a minimum number of replicates. This approach produces a union of all detected peaks across all samples. Read counts were first quantified over the global consensus peakset, which was then filtered per contrast to retain only peaks present in the relevant samples for downstream differential accessibility analysis."
+}
+
+knitr::asis_output(atacseq_text)
+```
+
+
+## Normalization
+
+```{r normalization_text, echo=FALSE, results='asis'}
+# Set normalization method description
+if (exists("spikeIn_dds")) {
+  species <- if (report_params$organism == "mmu") "mouse" else "human"
+  norm_text <- paste0(
+    "Spike-in normalization factors were calculated as the ratio of spike-in counts to ", 
+    species, 
+    " counts per sample, scaled by the median of these ratios. The inverse of these normalized ratios was assigned as the size factor for each sample in the ", 
+    species, 
+    " dataset, enabling normalization of counts based on spike-in abundance."
+  )
+} else {
+  norm_text <- "Spike-in normalization was not available for this dataset. Counts were normalized using the TMM (Trimmed Mean of M-values) method to account for library size differences."
+}
+
+knitr::asis_output(norm_text)
+```
+
+```{r make DGEList and norm}
+# === Normalize counts and construct DGEList ===
+targetGenome_counts <- assay(targetGenome_dds, "counts")
+
+if (exists("spikeIn_dds")) {
+  # --- Spike-in normalization ---
+  spikein_counts <- assay(spikeIn_dds, "counts")
+  common_samples <- intersect(colnames(targetGenome_counts), colnames(spikein_counts))
+  
+  # Subset to common samples
+  targetGenome_counts <- targetGenome_counts[, common_samples]
+  spikein_counts <- spikein_counts[, common_samples]
+  targetGenome_dds <- targetGenome_dds[, common_samples]
+  spikeIn_dds <- spikeIn_dds[, common_samples]
+  
+  # Compute spike-in normalization factors
+  targetGenome_libsizes <- colSums(targetGenome_counts)
+  spikein_libsizes <- colSums(spikein_counts)
+  spikein_ratio <- spikein_libsizes / targetGenome_libsizes
+  spikein_factors <- spikein_ratio / median(spikein_ratio)
+  norm_factors <- 1 / spikein_factors
+  
+  # Create normalized DGEList
+  dge <- DGEList(counts = targetGenome_counts)
+  dge$samples <- cbind(dge$samples, as.data.frame(colData(targetGenome_dds)))
+  dge$samples$norm.factors <- norm_factors
+
+} else {
+  # --- TMM normalization ---
+  cat("Spike-in data not available. Performing TMM normalization instead.\n")
+  suppressMessages(library(edgeR))
+  dge <- DGEList(counts = targetGenome_counts)
+  dge$samples <- cbind(dge$samples, as.data.frame(colData(targetGenome_dds)))
+  dge <- calcNormFactors(dge, method = "TMM")
+  norm_factors <- dge$samples$norm.factors
+}
+# === Raw DGEList for unnormalized PCA ===
+dge_raw <- dge
+dge_raw$samples$norm.factors <- rep(1, ncol(dge_raw))
+```
+
+
+
+## Sample Summary
+
+```{r sample info}
+colnames(targetGenome_dds) <- targetGenome_dds@colData$sample
+atac_qc_table <- summarize_atac_sample_qc(targetGenome_dds, render_table = FALSE)
+# Render separately
+DT::datatable(atac_qc_table, options = list(pageLength = 20, dom = 't'), rownames = FALSE)
+```
+
+```{r contrast-load}
+contrast_input <- report_params$contrasts
+contrast_list <- parse_contrasts(contrast_input)
+
+num_of_contrasts <- length(contrast_list)
+contrast_strings <- sapply(seq_along(contrast_list), function(i) {
+  paste0(i, ". ", contrast_list[[i]][1], " vs ", contrast_list[[i]][2])
+})
+```
+
+## Quality Control Plots
+
+```{r setup_norm_titles, echo=FALSE}
+# Setup normalization-specific plot titles and labels
+if (exists("spikeIn_dds")) {
+  norm_method_title <- "Spike-in Normalized"
+  pca_combined_title <- "PCA Comparison: Raw vs Spike-in Normalized"
+} else {
+  norm_method_title <- "TMM Normalized"
+  pca_combined_title <- "PCA Comparison: Raw vs TMM Normalized"
+}
+```
+
+### PCA Plots
+
+```{r pca_text, echo=FALSE,results='asis'}
+if (exists("spikeIn_dds")) {
+  pca_header <- "Principal Component Analysis (PCA) plots are used here to visualize the overall structure of the data. Two PCA plots are shown:
+
+- **Raw Counts:** Variance between samples based on raw counts without any normalization applied.
+- **Spike-in Normalized Counts:** Variance after spike-in normalization, where normalization factors were calculated based on spike-in controls to adjust for systematic biases.
+
+The side-by-side comparison highlights the effect of spike-in normalization on sample clustering."
+  pca_combined_title <- "PCA Comparison: Raw vs Spike-in Normalized"
+} else {
+  pca_header <- "Principal Component Analysis (PCA) plots are used here to visualize the overall structure of the data. Two PCA plots are shown:
+
+- **Raw Counts:** Variance between samples based on raw counts without any normalization applied.
+- **TMM Normalized Counts:** Variance after TMM normalization, which adjusts for library size differences without external spike-in controls.
+
+The side-by-side comparison highlights the effect of TMM normalization on sample clustering."
+  pca_combined_title <- "PCA Comparison: Raw vs TMM Normalized"
+}
+
+knitr::asis_output(pca_header)
+```
+
+```{r pca plot}
+# Plotting
+pca_plot_raw <- plot_pca(dge = dge_raw, title = "PCA - Raw Counts", show_legend = FALSE)
+pca_plot_norm <- plot_pca(dge = dge, title = paste0("PCA - ", norm_method_title), show_legend = TRUE)
+
+# Combine plots
+combined_plot <- subplot(
+  pca_plot_raw %>% layout(title = "PCA - Raw Counts"), 
+  pca_plot_norm %>% layout(title = paste0("PCA - ", norm_method_title)), 
+  nrows = 1, 
+  shareY = FALSE, 
+  titleX = TRUE, 
+  titleY = TRUE,
+  margin = 0.05 
+)
+
+# Set overall combined title
+combined_plot <- combined_plot %>%
+  layout(title = pca_combined_title)
+
+combined_plot
+```
+
+### Correlation Heatmaps
+
+```{r corr_text, echo=FALSE,results='asis', eval = !params$test_mode}
+if (exists("spikeIn_dds")) {
+  corr_header <- "The correlation heatmaps shown here represent the pairwise correlation between samples based on their log-transformed counts per million (CPM). Two sets of heatmaps are presented:
+
+- **Raw Counts:** The first heatmap shows the sample correlation using raw counts, providing an overview of how similarly the samples behave without any normalization.
+- **Spike-in Normalized Counts:** The second heatmap illustrates the correlation between samples after spike-in normalization, which helps account for technical variation and improve comparability between samples.
+
+These heatmaps help assess the overall quality of the samples and identify potential batch effects or outliers in the dataset."
+} else {
+  corr_header <- "The correlation heatmaps shown here represent the pairwise correlation between samples based on their log-transformed counts per million (CPM). Two sets of heatmaps are presented:
+
+- **Raw Counts:** The first heatmap shows the sample correlation using raw counts, providing an overview of how similarly the samples behave without any normalization.
+- **TMM Normalized Counts:** The second heatmap illustrates the correlation between samples after TMM normalization, which adjusts for library size differences without the use of spike-in controls.
+
+These heatmaps help assess the overall quality of the samples and identify potential batch effects or outliers in the dataset."
+}
+
+knitr::asis_output(corr_header)
+```
+
+```{r corr heatmaps, eval = !params$test_mode}
+# Correlation heatmaps from log2 CPM
+logcpm_raw  <- cpm(dge_raw, log = TRUE)
+logcpm_norm <- cpm(dge, log = TRUE)
+
+cor_raw  <- cor(logcpm_raw)
+cor_norm <- cor(logcpm_norm)
+
+# Plot side-by-side
+par(mfrow = c(1, 2))
+
+pheatmap(cor_raw, main = "Sample Correlation - Raw")
+pheatmap(cor_norm, main = paste0("Sample Correlation - ", norm_method_title))
+```
+
+```{r annotate consensus peaks}
+# === 1. Load and format annotated consensus peaks ===
+peaks_anno <- read.delim(paste0(report_params$nfcore_output_dir,"bowtie2/merged_library/macs2/broad_peak/consensus/consensus_peaks.mLb.clN.annotatePeaks.txt"))
+
+colnames(peaks_anno)[[1]] <- "interval"
+
+# === 2. Create GRanges
+peak_gr <- GRanges(
+  seqnames = peaks_anno$Chr,
+  ranges = IRanges(start = peaks_anno$Start, end = peaks_anno$End)
+)
+names(peak_gr) <- peaks_anno$interval  # interval names
+
+# Store in rownames if needed
+rownames(peaks_anno) <- peaks_anno$interval
+
+# add simplified annotation
+peaks_anno$Annotation_short <- gsub(" .*","",peaks_anno$Annotation)
+```
+
+## Quality Control Filtering
+
+To ensure that only high-quality samples were included in the differential accessibility analysis, we filtered samples based on their FRiP (Fraction of Reads in Peaks) scores. FRiP reflects how well the reads align to identified peaks — a key quality metric in ATAC-seq. According to ENCODE guidelines, FRiP should be at least 20%, with values over 30% considered high quality. Samples with FRiP scores below 20% were excluded from further analysis.
+
+```{r frip filter}
+# Report threshold and results
+frip_threshold <- 20
+high_quality_samples <- atac_qc_table$Sample[atac_qc_table$FRIP >= frip_threshold]
+low_quality_samples <- atac_qc_table$Sample[atac_qc_table$FRIP < frip_threshold]
+
+cat(sprintf("We excluded **%d** sample(s) with FRiP < %d%%. **%d** high-quality samples were retained.\n\n", 
+            length(low_quality_samples), frip_threshold, length(high_quality_samples)))
+
+# Display dropped samples and their FRiP scores
+if (length(low_quality_samples) > 0) {
+  dropped_df <- atac_qc_table[atac_qc_table$Sample %in% low_quality_samples, c("Sample", "FRIP")]
+  colnames(dropped_df) <- c("Sample", "FRiP (%)")
+  knitr::kable(dropped_df, format = "html", digits = 1, row.names = FALSE)
+} else {
+  cat("No samples were dropped based on FRiP filtering.\n")
+}
+```
+
+```{r frip drop}
+# Drop low-FRiP samples from the dge used for DA analysis
+dge <- dge[, colnames(dge) %in% high_quality_samples]
+```
+
+```{r analysis}
+invisible(
+  suppressMessages(
+    suppressWarnings(
+      capture.output(source("analysis.R", local = knitr::knit_global()))
+    )
+  )
+)
+```
+
+# Differential Accessibility Analysis
+
+To determine differential accessibility, a consensus set of peaks was first defined across all samples in the dataset included in this report. Peaks were included in the consensus set if they were present in at least two replicates within any group, ensuring robust detection of shared accessible regions. If more than one contrast was tested, this consensus peakset was filtered to retain only peaks present in at least two replicates in either of the contrast's groups.
+
+For each per-contrast consensus peak, the number of aligned reads overlapping that region was counted for every sample, resulting in a matrix of read counts per peak per sample ("peak count matrix"). 
+
+Differential accessibility analysis of the peak count matrix was performed using the R package edgeR v. 3.4 (McCarthy et al. 2012)[^1] to identify peaks with statistically significant differences in accessibility between the two conditions in each contrast. This edgeR analysis normalizes count data using spike-in factors, filters peaks with a minimum count of 5 and a minimum proportion of 0.5 across samples for a given contrast, fits a model using the formula ~0 + Condition, and performs differential expression testing to identify significant changes between conditions. Specifically, estimateDisp(dge_contrast, design_contrast) was used to estimate the biological variation (dispersion) in the data, and glmQLFit(dge_contrast, design_contrast) was used to fit a quasi-likelihood generalized linear model, which is more robust to overdispersion compared to glmFit for this type of data.
+
+## Overview of Contrasts
+
+```{r contrast print}
+# Print formatted output
+cat(
+  paste0(
+    "The following ", num_of_contrasts, 
+    " contrasts were tested for differential accessibility:\n",
+    paste(contrast_strings, collapse = "\n")
+  )
+)
+```
+
+## Summary of Differential Accessibility per-contrast
+
+In the per-contrast summary tables below, the "significance" column indicates the "direction" of the significant results (in what group the peak is more accessible), and the number of peaks indicates the number of peaks that are significantly more accessible (FDR < 0.05) in that group. Consensus peaks that were not significantly different between the two groups in the contrast are reported as "Not significant".
+
+```{r summary}
+# Create a summary table per contrast
+summary_tables <- lapply(names(results_list), function(contrast) {
+  df <- results_list[[contrast]]$table
+  contrast_clean <- gsub("\\.", "-", contrast)
+  df$contrast <- contrast_clean
+
+  df <- df %>%
+    mutate(significance = case_when(
+      FDR < 0.05 & logFC > 0 ~ paste("More Accessible (",strsplit(contrast, "_vs_")[[1]][1],")"),
+      FDR < 0.05 & logFC < 0 ~ paste("More Accessible (",strsplit(contrast, "_vs_")[[1]][2],")"),
+      TRUE ~ "Not Significant"
+    ))
+
+  summary <- df %>%
+    dplyr::count(significance) %>%
+    mutate(Contrast = contrast_clean) %>%
+    select(Contrast, everything())
+
+  return(summary)
+})
+
+# Render the summary tables using tagList and DT::datatable
+output_tables <- lapply(summary_tables, function(df) {
+  datatable(
+    df %>% rename("number of peaks" = "n"),
+    caption = paste("Summary of Differential Peak Accessibility for contrast:", df$Contrast[1]),
+    options = list(dom = 't', ordering = FALSE),
+    rownames = FALSE
+  ) %>%
+    formatStyle(
+      'significance',
+      target = 'row',
+      backgroundColor = styleEqual(
+        c(paste("More Accessible (", strsplit(df$Contrast[1], "_vs_")[[1]][1], ")"),
+          paste("More Accessible (", strsplit(df$Contrast[1], "_vs_")[[1]][2], ")"),
+          "Not Significant"),
+        c("lightblue", "lightcoral", "lightgray")
+      )
+    )
+})
+
+# Use tagList to render the tables properly in the report
+tagList(output_tables)
+```
+
+## Downloadable Results Tables
+
+Results of Differential Accessibility Analysis are provided below. Peak annotation was performed using HOMER as implemented in the nf-core/atacseq pipeline. Promoter regions were defined as peaks +/- 1,000 bp from TSS, and this designation may differ from the HOMER derived annotation in the annotation column(s) which considers promoter regions as those –1,000 bp to +100 bp relative to the transcription start site (TSS)
+
+```{r make downloads, message=FALSE, warning=FALSE,eval = !params$test_mode}
+library(dplyr)
+library(stringr)
+library(downloadthis)
+library(htmltools)
+
+# STEP 1: Create in-memory data frame lists (but don't write to disk)
+promoter_lists <- list()
+allregion_lists <- list()
+
+for (cn in names(results_list)) {
+  cn_clean <- gsub("\\.", "-", cn)  # Restores the original contrast name with "-"
+  contrast_data <- results_list[[cn]]$table
+  parts <- str_split(cn_clean, "_vs_", simplify = TRUE)
+  left <- parts[1]
+  right <- parts[2]
+
+  # Promoter regions
+  prom_df <- contrast_data %>% filter(FDR < 0.05, abs(Distance.to.TSS) < 1000)
+  prom_left <- prom_df %>% filter(logFC > 0)
+  prom_right <- prom_df %>% filter(logFC < 0)
+
+  promoter_lists[[cn_clean]] <- setNames(
+    list(prom_left, prom_right),
+    c(paste0("More acc. in ", left), paste0("More acc. in ", right))
+  )
+
+  # All annotated regions
+  all_df <- contrast_data %>% filter(FDR < 0.05)
+  all_left <- all_df %>% filter(logFC > 0)
+  all_right <- all_df %>% filter(logFC < 0)
+
+  allregion_lists[[cn_clean]] <- setNames(
+    list(all_left, all_right),
+    c(paste0("More acc. in ", left), paste0("More acc. in ", right))
+  )
+}
+
+# STEP 2: Create download buttons (no filepaths used)
+promoter_buttons <- purrr::map2(promoter_lists, names(promoter_lists), function(datalist, cn_clean) {
+  download_this(
+    .data = datalist,
+    output_name = paste0(report_params$seqID,"_Differential_Accessibility_Promoter_", gsub(" - ", "_vs_", cn_clean)),
+    button_label = paste0(report_params$seqID,"_DA Promoter Peaks:<br>", cn_clean),
+    button_type = "primary",
+    output_extension = ".xlsx"
+  )
+})
+
+allregion_buttons <- purrr::map2(allregion_lists, names(allregion_lists), function(datalist, cn_clean) {
+  download_this(
+    .data = datalist,
+    output_name = paste0(report_params$seqID,"_Differential_Accessibility_All_Regions_", cn_clean),
+    button_label = paste0(report_params$seqID,"_DA All Region Peaks:<br>", cn_clean),
+    button_type = "info",
+    output_extension = ".xlsx"
+  )
+})
+```
+
+```{r download table,eval = !params$test_mode}
+knitr::asis_output(
+  paste(
+    "<h3>Download Differential Accessibility Results</h3>",
+    "<table class='table table-striped'>",
+    "<thead><tr><th>Contrast</th><th>DA Promoter Regions</th><th>DA All Annotated Regions</th></tr></thead>",
+    "<tbody>",
+    paste0(
+      lapply(seq_along(promoter_lists), function(i) {
+        cn <- names(promoter_lists)[i]
+        paste(
+          "<tr>",
+          "<td><strong>", cn, "</strong></td>",
+          "<td>", promoter_buttons[[i]], "</td>",
+          "<td>", allregion_buttons[[i]], "</td>",
+          "</tr>"
+        )
+      }),
+      collapse = ""
+    ),
+    "</tbody></table>"
+  )
+)
+```
+
+# Visualization of Differential Accessibility
+
+## UCSC Track Hubs
+
+UCSC track hubs were generated for each contrast to support interactive visualization of differential accessibility results. These hubs allow genomic regions of interest to be viewed alongside signal tracks from individual samples in the UCSC Genome Browser.
+
+For each contrast, a set of filtered differentially accessible (DA) peaks was converted to BigBed format for browser visualization. **Peaks were filtered to retain those with a false discovery rate (FDR) less than 0.05, an absolute log2 fold change greater than 1, an average accessibility (logCPM) greater than 2, and an annotated gene name.** These filtered peaks were included as a track within the hub.
+
+Track hubs also include BigWig signal tracks for each individual sample to compare accessibility profiles across replicates and conditions in the genome browser. All hubs are hosted on a web-accessible directory linked to the UCSC Genome Browser.
+
+**Clicking the "UCSC Track" links in the table below will open the tracks in the UCSC Genome Browser.** Make sure to right click and select open a new tab if you do not want to navigate away from this report.
+
+If you prefer viewing the data in [IGV](https://www.igv.org), click the **[Download IGV Tracks](https://your-download-link.com)** link to save a zip folder to your computer. 
+
+Once the folder is downloaded, unzip it, go to [www.igv.org](https://www.igv.org) in your browser, then select **"Tracks" > "Local File"** and select all files in the downloaded folder.
+
+```{r make bigbed,eval = !params$test_mode}
+results_list <- convert_all_chr_to_ucsc(results_list)
+
+library(rtracklayer)
+
+mmu_chrom_sizes="/R/mm10.chrom.sizes"
+hsa_chrom_sizes="/R/hg38.chrom.sizes"
+
+chrom_sizes_file <- if (report_params$organism == "mmu") mmu_chrom_sizes else hsa_chrom_sizes
+
+write_bigbed_de_peaks(
+  results_list = results_list,
+  report_params = report_params,
+  chrom_sizes_file = chrom_sizes_file,
+  bedToBigBed_path = "/apps/ucsc/20210803/bedToBigBed"
+)
+```
+
+```{r make trackhubs, eval = !params$test_mode}
+# Iterate over contrast names
+for (contrast in names(results_list)) {
+  contrast_clean <- gsub("\\.", "-", contrast)
+  contrast_clean <- gsub("_", "-", contrast)
+  contrast_clean <- gsub("-vs-", "_vs_", contrast_clean)
+  
+  # Extract group1 and group2 from contrast
+groups <- strsplit(contrast, "_vs_")[[1]]
+group1 <- groups[1]
+group2 <- groups[2]
+
+# Identify the metadata variable that this contrast uses
+var_match <- NULL
+for (var in colnames(dge$samples)) {
+  vals <- make.names(unique(as.character(dge$samples[[var]])))
+  if (all(make.names(c(group1, group2)) %in% vals)) {
+    var_match <- var
+    break
+  }
+}
+if (is.null(var_match)) stop(paste("Could not identify variable for contrast:", contrast))
+
+# Build group_sample_map: a string like "Heat:sample1,sample2 Control:sample3,sample4"
+group_sample_map <- sapply(c(group1, group2), function(g) {
+  matched <- rownames(dge$samples)[make.names(as.character(dge$samples[[var_match]])) == make.names(g)]
+  paste0(g, ":", paste(matched, collapse = ","))
+})
+group_sample_map <- paste(group_sample_map, collapse = " ")
+
+# Set variables 
+  public_web_dir <- "/orange/cancercenter-dept/web/public/BCB-SR/trackhubs"
+  trackhub_dir <- file.path(public_web_dir, report_params$seqID, contrast_clean)
+  # Optional: verify .bb exists before calling script
+  bb_path <- file.path(trackhub_dir, paste0(contrast_clean, "_DA_peaks.bb"))
+  if (!file.exists(bb_path)) next
+   # Set the environment variables in the system call
+  Sys.setenv(pipeline_output = report_params$nfcore_output_dir, 
+           contrast = contrast_clean, 
+           seqID = report_params$seqID, 
+           organism = report_params$organism,
+           bb_path = bb_path,
+           group_sample_map = group_sample_map)
+
+  system2("bash", args = "../bash/build_ucsc_trackhub.sh")
+  system2("bash", args ="../bash/make_igv_zip.sh")
+}
+```
+
+```{r URLs,eval = !params$test_mode}
+trackhub_base_url <- "https://data.rc.ufl.edu/pub/cancercenter-dept"
+
+hub_links <- setNames(vector("character", length(results_list)), names(results_list))
+igv_links <- setNames(vector("character", length(results_list)), names(results_list))
+
+for (contrast in names(results_list)) {
+  contrast_clean <- gsub("\\.", "-", contrast)
+    contrast_clean <- gsub("_", "-", contrast)
+        contrast_clean <- gsub("-vs-", "_vs_", contrast_clean)
+
+  base_path <- paste0(trackhub_base_url, "/", report_params$seqID, "/", contrast_clean)
+
+  hub_links[[contrast]] <- paste0(
+    "https://genome.ucsc.edu/cgi-bin/hgTracks?hubUrl=", base_path, "/hub.txt"
+  )
+  igv_links[[contrast]] <- paste0(base_path, "/igv/", contrast_clean, "_igv_session.zip")
+}
+
+hub_links_md <- sapply(hub_links, function(url) {
+  sprintf("[View Tracks in UCSC Browser](%s)", url)
+})
+igv_links_md <- sapply(igv_links, function(url) {
+  sprintf("[Download IGV Tracks](%s)", url)
+})
+
+knitr::kable(
+  data.frame(
+    Contrast = names(hub_links_md),
+    UCSC_Track = hub_links_md,
+    IGV_Zip = igv_links_md
+  ),
+  format = "markdown",
+  row.names = FALSE
+)
+```
+
+## Barplots of Differential Peak Accessibility by Peak Annotation
+
+Barplots show the number of differentially accessible (DA) peaks within each annotation category (e.g., promoter, intron, intergenic) for each contrast. Peaks were grouped based on their significance and direction of accessibility (i.e., more accessible in one group vs. the other, or not significant).
+
+```{r plot_accessibility_ggplotly, message=FALSE, warning=FALSE, eval = !params$test_mode}
+# STEP 1: Combine all contrasts into one long dataframe
+all_results <- bind_rows(
+  lapply(names(results_list), function(contrast) {
+    df <- results_list[[contrast]]$table
+    df$contrast <- contrast
+    parts <- str_split(contrast, "_vs_", simplify = TRUE)
+    left <- str_trim(parts[1])
+    right <- str_trim(parts[2])
+    
+    df <- df %>%
+      mutate(significance = case_when(
+        FDR < 0.05 & logFC > 0 ~ paste0(right, "\n(More Accessible)"),
+        FDR < 0.05 & logFC < 0 ~ paste0(left, "\n(More Accessible)"),
+        TRUE ~ "Not Significant"
+      ))
+    return(df)
+  })
+)
+
+# STEP 2: One ggplotly plot per contrast
+interactive_plots <- lapply(unique(all_results$contrast), function(cn) {
+  contrast_df <- all_results %>% filter(contrast == cn)
+  contrast_df <- contrast_df %>% filter(!is.na(Annotation_short))
+  
+  p <- ggplot(contrast_df, aes(x = significance, fill = Annotation_short)) +
+    #geom_bar(position = "stack", width = 0.6) +
+    geom_bar(stat = "count", position = "stack", width = 0.6) +
+    geom_text(stat = "count", aes(label = after_stat(count)), 
+          position = position_stack(vjust = 0.5), size = 3)+
+
+    scale_fill_brewer(palette = "Paired") +
+    labs(
+      title = paste("Consensus Peak Annotation by Accessibility Category:\n", gsub("\\.", "-", cn)),
+      x = "Accessibility Category",
+      y = "Number of Consensus Peaks",
+      fill = "Annotation"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5),
+      plot.margin = margin(10, 10, 40, 10)
+    )
+  
+  ggplotly(p, tooltip = c("x", "fill", "count"))
+})
+
+# STEP 3: Display all interactive plots
+tagList(interactive_plots)
+```
+
+## MA Plots
+
+MA plots visualize the relationship between average accessibility (log<sub>2</sub> CPM) and differential accessibility (log<sub>2</sub> fold change) for each peak within a given contrast. Each point represents a consensus peak, with its position determined by its average accessibility across all samples (x-axis) and the estimated log fold change between groups (y-axis).
+
+Peaks are colored based on statistical significance and direction of change: red indicates peaks more accessible in one group, blue indicates peaks more accessible in the other, and gray represents non-significant differences. Only peaks with an absolute log<sub>2</sub> fold change greater than 1 and an FDR below 0.05 are considered significant.
+
+These plots are useful for assessing the global characteristics of each contrast — for example, whether one group has more widespread accessibility changes, whether there is an even distribution of up- and down-regulated peaks, and whether extreme fold changes are occurring mostly in low-abundance regions (which may reflect noise). They also help confirm that log fold changes are centered around zero in non-significant peaks, as expected when normalization and modeling are appropriately specified.
+
+```{r ma plots, eval = !params$test_mode}
+# Reusable preprocessing helper
+preprocess_result <- function(df, contrast) {
+  groups <- str_trim(str_split(gsub("\\.", "-", contrast), "_vs_", simplify = TRUE))
+  df$group1 <- groups[1]
+  df$group2 <- groups[2]
+  
+  df$Accessibility <- case_when(
+    df$FDR < 0.05 & df$logFC > 1  ~ paste0("More accessible in ", df$group1),
+    df$FDR < 0.05 & df$logFC < -1 ~ paste0("More accessible in ", df$group2),
+    TRUE                          ~ "Not Significant"
+  )
+  
+  df$Significant <- case_when(
+    df$FDR < 0.05 & df$logFC > 1  ~ "more",
+    df$FDR < 0.05 & df$logFC < -1 ~ "less",
+    TRUE                          ~ "ns"
+  )
+  
+  df$negLogFDR <- -log10(df$FDR)
+  df
+}
+
+# Interactive MA plots with plotly
+ma_results <- lapply(names(results_list), function(contrast) {
+  df <- preprocess_result(results_list[[contrast]]$table, contrast)
+
+  color_values <- setNames(
+    c("red", "blue", "gray"),
+    c(
+      paste0("More accessible in ", df$group1[1]),
+      paste0("More accessible in ", df$group2[1]),
+      "Not Significant"
+    )
+  )
+  
+  df$color <- color_values[df$Accessibility]
+
+  p <- plot_ly(
+    data = df,
+    x = ~logCPM,
+    y = ~logFC,
+    type = 'scatter',
+    mode = 'markers',
+    text = ~Gene.Name,
+    color = ~Accessibility,
+    colors = color_values,
+    marker = list(size = 5, opacity = 0.6)
+  ) %>%
+    layout(
+      title = list(text = paste("MA Plot: Differential Accessibility in<br>", gsub("\\.", "-", contrast))),
+      xaxis = list(title = "log2 CPM"),
+      yaxis = list(title = "log2 Fold Change"),
+      legend = list(title = list(text = "Accessibility"))
+    )
+
+  list(interactive_plot = p)
+})
+
+# Display all interactive MA plots
+tagList(lapply(ma_results, function(x) x$interactive_plot))
+
+```
+
+## Volcano Plots
+
+Volcano plots summarize the results of differential accessibility analysis by displaying the magnitude of change (log<sub>2</sub> fold change) on the x-axis and statistical significance (–log<sub>10</sub> FDR) on the y-axis. Each point represents a consensus peak tested within a given contrast.
+
+Peaks are colored based on statistical significance and direction of change: red indicates peaks more accessible in one group, blue indicates peaks more accessible in the other, and gray represents non-significant differences. Only peaks with an absolute log<sub>2</sub> fold change greater than 1 and an FDR below 0.05 are considered significant.
+
+Volcano plots are used to assess the overall strength and distribution of differential accessibility signals in each contrast. They help reveal whether a contrast has many significant peaks or only a few, whether the effect sizes are modest or extreme, and whether the signal is symmetric or biased toward one condition. Like MA plots, volcano plots serve as a quality check to confirm that differential patterns are consistent with expectations and that significance is not driven solely by low-count or high-variance regions.
+
+```{r volcano, eval = !params$test_mode}
+volcano_results <- lapply(names(results_list), function(contrast) {
+  df <- preprocess_result(results_list[[contrast]]$table, contrast)
+
+  # Define consistent colors
+  color_values <- setNames(
+    c("red", "blue", "gray"),
+    c(
+      paste0("More accessible in ", df$group1[1]),
+      paste0("More accessible in ", df$group2[1]),
+      "Not Significant"
+    )
+  )
+
+  df$color <- color_values[df$Accessibility]
+
+  # Create plotly volcano plot
+  p <- plot_ly(
+    data = df,
+    x = ~logFC,
+    y = ~negLogFDR,
+    type = 'scatter',
+    mode = 'markers',
+    text = ~Gene.Name,
+    color = ~Accessibility,
+    colors = color_values,
+    marker = list(size = 5, opacity = 0.6)
+  ) %>%
+    layout(
+      title = list(text = paste("Volcano Plot: Differential Accessibility in<br>", gsub("\\.", "-", contrast))),
+      xaxis = list(title = "log2 Fold Change"),
+      yaxis = list(title = "-log10(FDR)"),
+      legend = list(title = list(text = "Accessibility"))
+    )
+
+  list(interactive_plot = p)
+})
+
+# Display all volcano plots
+tagList(lapply(volcano_results, function(x) x$interactive_plot))
+
+```
+
+```{r, eval=FALSE}
+### Profile Plots by Group (deepTools)
+system2("bash", args = c(
+  "bash/make_group_profiles.sh",
+  report_params$contrasts,
+  report_params$pipeline_output,
+  file.path(report_params$outdir, "group_profiles")
+))
+```
+
+# Pathway Enrichment Analysis
+
+Pathway enrichment analysis was performed to identify functional enrichment of gene lists and to compare these significant results across contrasts.
+
+## Differentially Accessible Genes
+
+To create gene lists to input into enrichment analyses, differentially accessible peaks were filtered by FDR < 0.05 and split into more accessible in left group relative to right group (logFC >1) and less accessible (logFC < 1). From these filtered peaks, those annotated with entrez IDs were selected and these entrez IDs were used as input into the enrichment analysis.
+
+```{r make gene lists, eval = !params$test_mode}
+library("AnnotationDbi")
+library("clusterProfiler")
+
+if (report_params$organism == "hsa") {
+  library("org.Hs.eg.db")
+  org_db <- org.Hs.eg.db
+} else if (report_params$organism == "mmu") {
+  library("org.Mm.eg.db")
+  org_db <- org.Mm.eg.db
+} else {
+  stop("Unsupported organism: must be 'hsa' or 'mmu'")
+}
+
+# Convert all results to named gene lists by direction
+gene_list_named <- list()
+
+for (contrast in names(results_list)) {
+  df <- results_list[[contrast]]$table %>%
+    rename(ensembleID = Entrez.ID) %>%
+    mutate(
+      ENTREZID = as.character(mapIds(
+        org_db,
+        keys = ensembleID,
+        column = "ENTREZID",
+        keytype = "ENSEMBL",
+        multiVals = "first"
+      ))
+    )
+  
+  up_genes <- df %>%
+    filter(FDR < 0.05, logFC > 1) %>%
+    pull(ENTREZID) %>%
+    na.omit() %>% unique()
+  
+  down_genes <- df %>%
+    filter(FDR < 0.05, logFC < -1) %>%
+    pull(ENTREZID) %>%
+    na.omit() %>% unique()
+  
+  contrast_clean <- gsub("\\.", "_", contrast)
+  
+  gene_list_named[[paste0(contrast_clean, ".up")]] <- up_genes
+  gene_list_named[[paste0(contrast_clean, ".down")]] <- down_genes
+}
+```
+
+## Gene Ontology (GO) Enrichment Analysis
+
+Gene Ontology enrichment of gene annotation of differentially accessibile regions was performed using the enrichGO function in clusterProfiler v4.8 (Yu et al. 2012) in each of three GO categories (BP, MF, CC). **Interactive GO enrichment plots** are based on the top 10 significantly enriched GO terms per GO category per gene list. Hover over the plot to view p-value, gene ratio, and up to the top 20 DE genes (sorted by DE adj.p.value) in that term.
+
+To assess similarities between gene lists' enrichment results, if a gene list(s) had significant results for a different gene lists' top-10 term, that result is displayed as well regardless of whether or not the result was in top 10. **Downloadable results excel file** include all significant results for all gene lists.
+
+```{r GO, eval = !params$test_mode}
+# Run GO enrichment
+# Combine results into one data frame and add the 'Contrast' column dynamically
+de_results_df <- bind_rows(lapply(names(results_list), function(contrast) {
+  df <- results_list[[contrast]][["table"]]
+  df$Contrast <- contrast  # Add the contrast column
+  return(df)
+}))
+# Ensure universe_entrez contains all unique Entrez IDs
+universe_entrez <- na.omit(unique(de_results_df$Entrez.ID))  # Make sure Entrez.ID column is used correctly
+
+# Map Ensembl IDs in universe_entrez to Entrez IDs
+universe_entrez <- mapIds(org_db,
+                          keys = universe_entrez,  # The Ensembl IDs in universe_entrez
+                          column = "ENTREZID",     # We want to get Entrez IDs
+                          keytype = "ENSEMBL",     # keytype should be ENSEMBL since the universe is Ensembl IDs
+                          multiVals = "first")
+
+# Remove any NA values after mapping (if there were Ensembl IDs that could not be mapped)
+universe_entrez <- na.omit(universe_entrez)
+```
+
+```{r run GO enrich, eval = !params$test_mode}
+# Perform GO Enrichment for BP, MF, CC
+GO_BP_results <- generate_enrichment_plot_atac(
+  gene_lists = gene_list_named, 
+  de_results_df = de_results_df, 
+  universe_entrez = universe_entrez,
+  ont_category = "BP",
+  annotation_db = report_params$annotation_db
+)
+
+GO_MF_results <- generate_enrichment_plot_atac(
+  gene_lists = gene_list_named, 
+  de_results_df = de_results_df, 
+  universe_entrez = universe_entrez,
+  ont_category = "MF",
+  annotation_db = report_params$annotation_db
+)
+
+GO_CC_results <- generate_enrichment_plot_atac(
+  gene_lists = gene_list_named, 
+  de_results_df = de_results_df, 
+  universe_entrez = universe_entrez,
+  ont_category = "CC",
+  annotation_db = report_params$annotation_db
+)
+```
+
+```{r GO enrich plots,fig.width=12, fig.height=10, eval = !params$test_mode}
+# Display interactive plots
+download_button_png(GO_BP_results$static_plot, "GO_BP_enrich_plot",height = 12)
+GO_BP_results$interactive_plot
+
+download_button_png(GO_MF_results$static_plot, "GO_MF_enrich_plot",height=12)
+GO_MF_results$interactive_plot
+
+download_button_png(GO_CC_results$static_plot, "GO_CC_enrich_plot",height=12)
+GO_CC_results$interactive_plot
+
+# Combine GO results into a single list of data frames
+GO_results_list <- list(
+  "BP_Results" = GO_BP_results$go_results,
+  "MF_Results" = GO_MF_results$go_results,
+  "CC_Results" = GO_CC_results$go_results
+)
+# Remove NULL elements
+GO_results_list <- GO_results_list[!sapply(GO_results_list, is.null)]
+
+
+# Loop through the list of data frames and apply the substitution
+GO_results_list <- lapply(GO_results_list, function(df) {
+  df$GeneSymbols <- gsub("<br>", "/", df$GeneSymbols)
+  return(df)
+})
+# Download GO results as an Excel file if any exist
+if (length(GO_results_list) > 0) {
+  GO_results_list %>% downloadthis::download_this(
+    output_name = "GO_results",
+    output_extension = ".xlsx",
+    button_label = "Download GO enrichment results for all GO categories and all contrasts",
+    button_type = "primary",
+    has_icon = TRUE,
+    icon = "fa fa-save"
+  )
+} else {
+  cat("<b>No GO enrichment results available to download.</b>")
+}
+```
+
+## KEGG Pathway Enrichment Analysis
+
+KEGG enrichment was performed using the enrichKEGG function in clusterProfiler v4.8 (Yu et al. 2012). **Interactive KEGG enrichment plots** are based on the top 10 significantly enriched KEGG pathways per gene list. Hover over the plot to view p-value, gene ratio, and up to the top 20 DE genes (sorted by DE adj.p.value) in that pathway.
+
+To assess similarities between gene lists' enrichment results, if a gene list(s) had significant results for a different gene lists' top-10 pathway, that result is displayed as well regardless of whether or not the result was in top 10. **Downloadable results excel file** include all significant results for all gene lists.
+
+```{r KEGG, eval=TRUE, message=FALSE, eval = !params$test_mode}
+# Run the KEGG enrichment function with error handling
+kegg_results <- tryCatch({
+  generate_kegg_enrichment_plot_atac(
+    gene_lists = gene_list_named, 
+    de_results_df = de_results_df, 
+    universe_entrez = universe_entrez,
+    annotation_db = report_params$annotation_db 
+  )
+}, error = function(e) {
+  message("[INFO] KEGG enrichment was not performed due to no enrichment found in any gene list")
+  NULL
+})
+```
+
+```{r kegg plot,fig.width=12, fig.height=10, eval = !params$test_mode}
+# Only proceed if kegg_results is not NULL
+if (!is.null(kegg_results)) {
+  download_button_png(kegg_results$static_plot, "kegg_enrichment_plot", height = 12)
+  kegg_results$interactive_plot
+  
+  kegg_results[["kegg_results"]]$GeneSymbols <- gsub("<br>", "/", kegg_results[["kegg_results"]]$GeneSymbols)
+  
+  kegg_results[["kegg_results"]] %>%
+    downloadthis::download_this(
+      output_name = paste(report_params$seqID, "KEGG_results", sep = "_"),
+      output_extension = ".xlsx",
+      button_label = "Download KEGG enrichment results for all contrasts",
+      button_type = "primary",
+      has_icon = TRUE,
+      icon = "fa fa-save"
+    )
+} else {
+  cat("### KEGG enrichment was not available for this dataset due to too few DA peaks.\n")
+}
+```
+
+# References
+
+[^1]: McCarthy DJ, Chen Y and Smyth GK (2012). Differential expression analysis of multifactor RNA-Seq experiments with respect to biological variation. Nucleic Acids Research 40, 4288-4297
+
+[^2]: Patel, H., Espinosa-Carrasco, J., Langer, B., Ewels, P., nf-core bot, Garcia, M. U., Syme, R., Peltzer, A., Talbot, A., Behrens, D., Gabernet, G., Jin, M., Hörtenhuber, M., Gonzalez Rodriguez, J., Menden, K., & An, Ö. (2022). nf-core/atacseq: 2.1.2. [GitHub repository]. https://github.com/nf-core/atacseq (accessed August 7, 2022).
+
+
+
