@@ -589,8 +589,8 @@ results_list <- convert_all_chr_to_ucsc(results_list)
 
 library(rtracklayer)
 
-mmu_chrom_sizes="/R/mm10.chrom.sizes"
-hsa_chrom_sizes="/R/hg38.chrom.sizes"
+mmu_chrom_sizes="mm10.chrom.sizes"
+hsa_chrom_sizes="hg38.chrom.sizes"
 
 chrom_sizes_file <- if (report_params$organism == "mmu") mmu_chrom_sizes else hsa_chrom_sizes
 
