@@ -34,7 +34,6 @@ export APPDIR
 # === Run the Shiny app inside the container ===
 apptainer exec \
   --bind "$(pwd)":/app \
-  --bind /blue/cancercenter-dept/CONTAINERS/shared_R_lib:/usr/local/lib/R/site-library \
   --env HOST_APPDIR="$APPDIR" \
   /blue/cancercenter-dept/CONTAINERS/atacseq_app.sif \
   Rscript -e "shiny::runApp('/app', host = '0.0.0.0', port = ${PORT})" > atacReportApp_Render_${SLURM_JOB_ID}.log 2>&1
