@@ -2,11 +2,14 @@
 
 This Shiny app generates an interactive HTML report for differential chromatin accessibility using output from the **nf-core/atacseq** pipeline.
 
-It supports automated normalization, filtering, and contrast-based differential analysis using `edgeR`, and produces summary tables, volcano plots, contrast comparisons, enrichment analyses, and trackhub export tools. The sample sheet can be edited to customize which samples are included, how metadata are grouped, and what comparisons are made. Optional metadata fields allow the report to be customized for your project.
+It supports automated normalization, filtering, and contrast-based differential analysis using `edgeR`, and produces summary tables, volcano plots, contrast comparisons, enrichment analyses, and trackhub export tools. 
 
+The sample sheet can be downloaded, edited, and uploaded to customize which samples are included, how metadata are grouped, and what comparisons are made. 
+
+Optional fields allow the report to be customized for your project.
 ---
 
-## ✅ What You Need
+## What You Need
 
 To run the app, you'll need:
 
@@ -19,7 +22,7 @@ To run the app, you'll need:
 
 ---
 
-## 🚀 How to Use It
+## How to Use It
 
 ### 1. Clone this repository anywhere on HiPerGator:
 ```bash
