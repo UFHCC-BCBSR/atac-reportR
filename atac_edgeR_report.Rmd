@@ -232,8 +232,6 @@ dge_raw <- dge
 dge_raw$samples$norm.factors <- rep(1, ncol(dge_raw))
 ```
 
-
-
 ## Sample Summary
 
 ```{r sample info}
@@ -644,32 +642,32 @@ group_sample_map <- paste(group_sample_map, collapse = " ")
            bb_path = bb_path,
            group_sample_map = group_sample_map)
 
-  system2("bash", args = "../bash/build_ucsc_trackhub.sh")
-  system2("bash", args ="../bash/make_igv_zip.sh")
+  system2("bash", args = "bash/build_ucsc_trackhub.sh")
+  system2("bash", args ="bash/make_igv_zip.sh")
 }
 ```
 
 ```{r URLs,eval = !params$test_mode}
-trackhub_base_url <- "https://data.rc.ufl.edu/pub/cancercenter-dept"
+trackhub_base_url <- "https://data.rc.ufl.edu/pub/cancercenter-dept/BCB-SR"
 
 hub_links <- setNames(vector("character", length(results_list)), names(results_list))
 igv_links <- setNames(vector("character", length(results_list)), names(results_list))
 
 for (contrast in names(results_list)) {
   contrast_clean <- gsub("\\.", "-", contrast)
-    contrast_clean <- gsub("_", "-", contrast)
-        contrast_clean <- gsub("-vs-", "_vs_", contrast_clean)
-
-  base_path <- paste0(trackhub_base_url, "/", report_params$seqID, "/", contrast_clean)
+  contrast_clean <- gsub("_", "-", contrast)
+  contrast_clean <- gsub("-vs-", "_vs_", contrast_clean)
 
   hub_links[[contrast]] <- paste0(
-    "https://genome.ucsc.edu/cgi-bin/hgTracks?hubUrl=", base_path, "/hub.txt"
+    trackhub_base_url, "/trackhubs/", report_params$seqID, "/", contrast_clean, "/hub.txt"
   )
-  igv_links[[contrast]] <- paste0(base_path, "/igv/", contrast_clean, "_igv_session.zip")
+  igv_links[[contrast]] <- paste0(
+    trackhub_base_url, "/igv/", report_params$seqID, "/", contrast_clean, "_igv.zip"
+  )
 }
 
 hub_links_md <- sapply(hub_links, function(url) {
-  sprintf("[View Tracks in UCSC Browser](%s)", url)
+  sprintf("[View Tracks in UCSC Browser](https://genome.ucsc.edu/cgi-bin/hgTracks?hubUrl=%s)", url)
 })
 igv_links_md <- sapply(igv_links, function(url) {
   sprintf("[Download IGV Tracks](%s)", url)
