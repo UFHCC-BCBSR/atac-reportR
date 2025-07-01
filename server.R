@@ -15,10 +15,10 @@ server <- function(input, output, session) {
       return(paste("✅ Using uploaded sample sheet:", sample_sheet_path()))
     } else if (!is.null(input$sample_sheet) && file.exists(input$sample_sheet)) {
       return(paste("✅ Using sample sheet from text field:", input$sample_sheet))
-    } else if (!is.null(input$nfcore_output_dir)) {
-      fallback <- file.path(input$nfcore_output_dir, "pipeline_info/samplesheet.valid.csv")
-      if (file.exists(fallback)) {
-        return(paste("✅ Using fallback sample sheet from nf-core output dir:", fallback))
+    } else {
+      fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      if (!is.na(fallback) && file.exists(fallback)) {
+        return(paste("✅ Using fallback sample sheet from derived path:", fallback))
       }
     }
     return("❌ No valid sample sheet found.")
@@ -54,11 +54,9 @@ server <- function(input, output, session) {
     }
     
     # Priority 3: fallback from nf-core output dir
-    if (!is.null(input$nfcore_output_dir) && input$nfcore_output_dir != "") {
-      fallback <- file.path(input$nfcore_output_dir, "pipeline_info/samplesheet.valid.csv")
-      if (file.exists(fallback)) {
-        return(read.csv(fallback, stringsAsFactors = FALSE))
-      }
+    fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+    if (!is.na(fallback) && file.exists(fallback)) {
+      return(read.csv(fallback, stringsAsFactors = FALSE))
     }
     
     return(NULL)
@@ -80,11 +78,10 @@ server <- function(input, output, session) {
     }
     
     contrast_lines <- NULL
-    if (!is.null(input$contrasts) && file.exists(input$contrasts)) {
-      contrast_lines <- trimws(readLines(input$contrasts, warn = FALSE))
+    if (!is.null(input$contrasts)) {
+      # input$contrasts is a fileInput; read from its $datapath
+      contrast_lines <- trimws(readLines(input$contrasts$datapath, warn = FALSE))
       contrast_lines <- contrast_lines[contrast_lines != ""]
-    } else if (!is.null(input$contrasts) && input$contrasts != "") {
-      contrast_lines <- unlist(strsplit(input$contrasts, ",\\s*"))
     }
     
     if (!is.null(contrast_lines) && length(contrast_lines) > 0) {
@@ -145,7 +142,6 @@ server <- function(input, output, session) {
       paste("--Report_Reviewed_By", dq(input$Report_Reviewed_By)),
       paste("--raw_seq_URL", dq(input$raw_seq_URL)),
       paste("--multiqc_url", dq(input$multiqc_url)),
-      paste("--nfcore_output_dir", dq(input$nfcore_output_dir)),
       paste("--seqID", dq(input$seqID)),
       paste("--min_count_for_filtering", dq(input$min_count_for_filtering)),
       paste("--min_prop_for_filtering", dq(input$min_prop_for_filtering)),
@@ -157,8 +153,10 @@ server <- function(input, output, session) {
     if (!is.null(sample_sheet_path())) {
       params <- append(params, paste("--sample_sheet", dq(sample_sheet_path())))
     } else if (input$sample_sheet == "" || is.null(input$sample_sheet)) {
-      fallback_path <- file.path(input$nfcore_output_dir, "pipeline_info/samplesheet.valid.csv")
-      params <- append(params, paste("--sample_sheet", dq(fallback_path)))
+      fallback_path <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      if (!is.na(fallback_path) && file.exists(fallback_path)) {
+        params <- append(params, paste("--sample_sheet", dq(fallback_path)))
+      }
     }
     return(params)
   }
@@ -251,7 +249,6 @@ server <- function(input, output, session) {
       updateTextInput(session, "Report_Reviewed_By", value = param_list$Report_Reviewed_By)
       updateTextInput(session, "raw_seq_URL", value = param_list$raw_seq_URL)
       updateTextInput(session, "multiqc_url", value = param_list$multiqc_url)
-      updateTextInput(session, "nfcore_output_dir", value = param_list$nfcore_output_dir)
       updateTextInput(session, "nfcore_spikein_dir", value = param_list$nfcore_spikein_dir)
       updateNumericInput(session, "min_count_for_filtering", value = as.numeric(param_list$min_count_for_filtering))
       updateNumericInput(session, "min_prop_for_filtering", value = as.numeric(param_list$min_prop_for_filtering))
@@ -326,7 +323,6 @@ server <- function(input, output, session) {
   observeEvent(input$clear_params, {
     # Reset all inputs
     updateTextInput(session, "report_title", value = "")
-    updateTextInput(session, "nfcore_output_dir", value = "")
     updateTextInput(session, "nfcore_spikein_dir", value = "")
     updateTextInput(session, "group_var", value = "")
     updateTextInput(session, "contrasts", value = "")
