@@ -114,7 +114,16 @@ if (url == "") {
 
 ```{r load data}
 # Load target genome data
-load(paste0(report_params$nfcore_output_dir, "/bowtie2/merged_library/macs2/broad_peak/consensus/deseq2/consensus_peaks.mLb.clN.dds.RData"))
+rdata_path <- Sys.glob(
+  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.dds.RData")
+)[1]
+
+if (!is.na(rdata_path) && file.exists(rdata_path)) {
+  load(rdata_path)
+  # RData variables now available in environment
+} else {
+  stop("❌ consensus_peaks.mLb.clN.dds.RData file could not be found for seqID: ", report_params$seqID)
+}
 targetGenome_dds <- dds
 rm(dds)
 # Extract counts immediately
@@ -350,7 +359,15 @@ pheatmap(cor_norm, main = paste0("Sample Correlation - ", norm_method_title))
 
 ```{r annotate consensus peaks}
 # === 1. Load and format annotated consensus peaks ===
-peaks_anno <- read.delim(paste0(report_params$nfcore_output_dir,"bowtie2/merged_library/macs2/broad_peak/consensus/consensus_peaks.mLb.clN.annotatePeaks.txt"))
+anno_path <- Sys.glob(
+  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.annotatePeaks.txt")
+)[1]
+
+if (!is.na(anno_path) && file.exists(anno_path)) {
+  peaks_anno <- read.delim(anno_path)
+} else {
+  stop("❌ consensus_peaks.mLb.clN.annotatePeaks.txt file could not be found for seqID: ", report_params$seqID)
+}
 
 colnames(peaks_anno)[[1]] <- "interval"
 
@@ -635,16 +652,20 @@ group_sample_map <- paste(group_sample_map, collapse = " ")
   bb_path <- file.path(trackhub_dir, paste0(contrast_clean, "_DA_peaks.bb"))
   if (!file.exists(bb_path)) next
    # Set the environment variables in the system call
-  Sys.setenv(pipeline_output = report_params$nfcore_output_dir, 
-           contrast = contrast_clean, 
-           seqID = report_params$seqID, 
-           organism = report_params$organism,
-           bb_path = bb_path,
-           group_sample_map = group_sample_map)
+pipeline_output <- Sys.glob(
+  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID))[1]
+if (is.na(pipeline_output) || !dir.exists(pipeline_output)) stop("Could not find pipeline output dir for seqID: ", report_params$seqID)
 
-  system2("bash", args = "bash/build_ucsc_trackhub.sh")
-  system2("bash", args ="bash/make_igv_zip.sh")
-}
+Sys.setenv(
+  pipeline_output = pipeline_output,
+  contrast = contrast_clean,
+  seqID = report_params$seqID,
+  organism = report_params$organism,
+  bb_path = bb_path,
+  group_sample_map = group_sample_map
+)
+system2("bash", args = "bash/build_ucsc_trackhub.sh")
+system2("bash", args ="bash/make_igv_zip.sh")
 ```
 
 ```{r URLs,eval = !params$test_mode}
