@@ -11,6 +11,7 @@ server <- function(input, output, session) {
   
   
   output$sample_sheet_source <- renderText({
+    req(input$seqID)
     if (!is.null(sample_sheet_path())) {
       return(paste("✅ Using uploaded sample sheet:", sample_sheet_path()))
     } else if (!is.null(input$sample_sheet) && file.exists(input$sample_sheet)) {
@@ -184,9 +185,8 @@ server <- function(input, output, session) {
       }
       current_params(param_data)
       
-      params_outdir <- file.path(host_appdir, "param_files")
-      dir.create(params_outdir, recursive = TRUE, showWarnings = FALSE)
-      params_path <- file.path(params_outdir, paste0(input$seqID, "_params.txt"))
+      data_dir <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID))
+      params_path <- file.path(data_dir, paste0(input$seqID, "_params.txt"))
       params_path_global(params_path)
       writeLines(unlist(params), params_path)
       
