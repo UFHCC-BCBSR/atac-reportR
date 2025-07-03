@@ -11,7 +11,7 @@ server <- function(input, output, session) {
   if (host_appdir == "") host_appdir <- getwd()  # fallback if unset
   data_dir <- reactive({
     req(input$seqID)
-    Sys.glob(file.path('/blue/jobrant/privapps/data/atac', '*', input$seqID))
+    Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID))
   })  
   output$sample_sheet_source <- renderText({
     req(input$seqID)
@@ -20,7 +20,7 @@ server <- function(input, output, session) {
     } else if (!is.null(input$sample_sheet) && file.exists(input$sample_sheet)) {
       return(paste("✅ Using sample sheet from text field:", input$sample_sheet))
     } else {
-      fallback <- Sys.glob(file.path('/blue/jobrant/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
       if (!is.na(fallback) && file.exists(fallback)) {
         return(paste("✅ Using fallback sample sheet from derived path:", fallback))
       }
@@ -63,7 +63,7 @@ server <- function(input, output, session) {
     }
     
     # Priority 3: fallback from nf-core output dir
-    fallback <- Sys.glob(file.path('/blue/jobrant/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+    fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
     if (!is.na(fallback) && file.exists(fallback)) {
       return(read.csv(fallback, stringsAsFactors = FALSE))
     }
@@ -127,7 +127,7 @@ server <- function(input, output, session) {
   observe({
     # This will trigger when sample_sheet_path() and input$seqID change
     if (is.null(sample_sheet_path())) {
-      fallback <- Sys.glob(file.path('/blue/jobrant/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
       if (!is.na(fallback) && file.exists(fallback)) {
         validate_sample_sheet()
       }
@@ -167,7 +167,7 @@ server <- function(input, output, session) {
     if (!is.null(sample_sheet_path())) {
       params <- append(params, paste("--sample_sheet", dq(sample_sheet_path())))
     } else if (input$sample_sheet == "" || is.null(input$sample_sheet)) {
-      fallback_path <- Sys.glob(file.path('/blue/jobrant/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      fallback_path <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
       if (!is.na(fallback_path) && file.exists(fallback_path)) {
         params <- append(params, paste("--sample_sheet", dq(fallback_path)))
       }
