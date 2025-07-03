@@ -50,10 +50,10 @@ select <- dplyr::select
 if (exists("params") && !is.null(params$params_file)) {
   report_params <- parse_params(params$params_file)
 } else {
-  #report_params <- parse_params("/blue/cancercenter-dept/PIPELINES/REPORTING/atacseq_report_module/param_files/testing/NS4167_Male_GoodSamples_params.txt")
+  #report_params <- parse_params("/blue/jobrant/PIPELINES/REPORTING/atacseq_report_module/param_files/testing/NS4167_Male_GoodSamples_params.txt")
   stop("params$params_file is not available. This Rmd must be run with a params file.")
 }
-resolved_seq_dir <- Sys.glob(file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID))[1]
+resolved_seq_dir <- Sys.glob(file.path("/blue/jobrant/privapps/data/atac", "*", report_params$seqID))[1]
 if (is.na(resolved_seq_dir) || !dir.exists(resolved_seq_dir)) {
   stop("ATAC directory for seqID not found: ", report_params$seqID)
 }
@@ -119,7 +119,7 @@ if (url == "") {
 ```{r load data}
 # Load target genome data
 rdata_path <- Sys.glob(
-  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.dds.RData")
+  file.path("/blue/jobrant/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.dds.RData")
 )[1]
 
 if (!is.na(rdata_path) && file.exists(rdata_path)) {
@@ -364,7 +364,7 @@ pheatmap(cor_norm, main = paste0("Sample Correlation - ", norm_method_title))
 ```{r annotate consensus peaks}
 # === 1. Load and format annotated consensus peaks ===
 anno_path <- Sys.glob(
-  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.annotatePeaks.txt")
+  file.path("/blue/jobrant/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.annotatePeaks.txt")
 )[1]
 
 if (!is.na(anno_path) && file.exists(anno_path)) {
@@ -657,7 +657,7 @@ group_sample_map <- paste(group_sample_map, collapse = " ")
   if (!file.exists(bb_path)) next
    # Set the environment variables in the system call
 pipeline_output <- Sys.glob(
-  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID))[1]
+  file.path("/blue/jobrant/privapps/data/atac", "*", report_params$seqID))[1]
 if (is.na(pipeline_output) || !dir.exists(pipeline_output)) stop("Could not find pipeline output dir for seqID: ", report_params$seqID)
 
 Sys.setenv(
