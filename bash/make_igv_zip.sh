@@ -29,7 +29,10 @@ cd "$TEMP_DIR"
 zip -r "$FINAL_ZIP" ./*
 
 # === Set permissions and clean up ===
-chmod o+r "$FINAL_ZIP"
+# Ensure path to .zip is traversable and file is readable
+chmod o+rx "${PUBLIC_WEB_DIR}/igv/${SEQID}"
+chmod o+r "${FINAL_ZIP}"
+
 rm -rf "$TEMP_DIR"
 
 # === Output location ===

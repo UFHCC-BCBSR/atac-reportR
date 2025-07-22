@@ -46,13 +46,19 @@ library(downloadthis)
 select <- dplyr::select
 ```
 
-```{r parse params}
-if (exists("params") && !is.null(params$params_file)) {
-  report_params <- parse_params(params$params_file)
-} else {
-  #report_params <- parse_params("/blue/cancercenter-dept/PIPELINES/REPORTING/atacseq_report_module/param_files/testing/NS4167_Male_GoodSamples_params.txt")
-  stop("params$params_file is not available. This Rmd must be run with a params file.")
+```{r parse-params, include=FALSE}
+# Allow both interactive (manual) and app-driven rendering
+if (!exists("params") || is.null(params$params_file)) {
+  message("Running interactively — setting default params file manually")
+  params <- list(
+    params_file = params_path,
+    report_title = "Test Report",
+    test_mode = TRUE
+  )
 }
+
+report_params <- parse_params(params$params_file)
+
 resolved_seq_dir <- Sys.glob(file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID))[1]
 if (is.na(resolved_seq_dir) || !dir.exists(resolved_seq_dir)) {
   stop("ATAC directory for seqID not found: ", report_params$seqID)
@@ -674,7 +680,7 @@ system2("bash", args ="bash/make_igv_zip.sh")
 ```
 
 ```{r URLs,eval = !params$test_mode}
-trackhub_base_url <- "https://data.rc.ufl.edu/pub/cancercenter-dept/BCB-SR"
+trackhub_base_url <- "http://data.rc.ufl.edu/pub/cancercenter-dept/BCB-SR"
 
 hub_links <- setNames(vector("character", length(results_list)), names(results_list))
 igv_links <- setNames(vector("character", length(results_list)), names(results_list))

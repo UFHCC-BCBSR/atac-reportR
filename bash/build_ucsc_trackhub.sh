@@ -136,7 +136,10 @@ done
 chmod -R o+rX "$TRACKHUB_DIR"
 
 # === Output final UCSC link ===
-echo
+# Ensure parent directories are also traversable
+chmod o+rx "$PUBLIC_WEB_DIR"
+chmod o+rx "$PUBLIC_WEB_DIR/$SEQID"
+
 echo "[SUCCESS] Trackhub deployed!"
 echo "UCSC Genome Browser Link:"
 
