@@ -6,7 +6,6 @@ server <- function(input, output, session) {
   current_params <- reactiveVal(list())
   report_ready <- reactiveVal(FALSE)
   params_generated <- reactiveVal(FALSE)
-  contrasts_path <- reactiveVal(NULL)
   host_appdir <- Sys.getenv("HOST_APPDIR")
   if (host_appdir == "") host_appdir <- getwd()  # fallback if unset
   data_dir <- reactive({
@@ -42,12 +41,34 @@ server <- function(input, output, session) {
       write.csv(df, file, row.names = FALSE)
     }
   )
-  observeEvent(input$contrasts, {
-    req(input$contrasts)
+  # Store contrasts
+  contrasts_path <- reactiveVal(NULL)
+  contrast_lines <- reactiveVal(NULL)
+  
+  observeEvent(input$contrasts_file, {
+    req(input$contrasts_file)
     dest <- file.path(data_dir(), paste0(input$seqID, "_contrasts.csv"))
-    file.copy(input$contrasts$datapath, dest, overwrite = TRUE)
+    file.copy(input$contrasts_file$datapath, dest, overwrite = TRUE)
     contrasts_path(dest)
+    
+    lines <- trimws(readLines(dest, warn = FALSE))
+    lines <- lines[lines != ""]
+    
+    contrast_lines(lines)
+    validate_sample_sheet()  # ✅ Trigger validation here too
   })
+  
+  
+  observeEvent(input$contrasts_text, {
+    if (nzchar(input$contrasts_text)) {
+      text_lines <- unlist(strsplit(input$contrasts_text, ",\\s*"))
+      contrast_lines(trimws(text_lines))
+      contrasts_path(NULL)  # Clear file path if using manual input
+      validate_sample_sheet()  # ✅ Run validation after contrast entry
+    }
+  })
+  
+  
   
   sample_sheet_data <- reactive({
     # Priority 1: user uploaded a new file
@@ -83,28 +104,29 @@ server <- function(input, output, session) {
     if (!"sample_id" %in% colnames(df)) {
       messages <- c(messages, "⚠️ No 'sample_id' column found. The 'sample' column will be used instead.")
     }
-    contrast_lines <- NULL
-    if (!is.null(input$contrasts)) {
-      # input$contrasts is a fileInput; read from its $datapath
-      contrast_lines <- trimws(readLines(input$contrasts$datapath, warn = FALSE))
-      contrast_lines <- contrast_lines[contrast_lines != ""]
-    }
-    if (!is.null(contrast_lines) && length(contrast_lines) > 0) {
-      for (contrast in contrast_lines) {
-        parts <- unlist(strsplit(contrast, "_vs_"))
-        found <- any(sapply(df, function(col) all(parts %in% unique(col))))
+    lines <- contrast_lines()
+    if (!is.null(lines) && length(lines) > 0) {
+      for (contrast in lines) {
+        parts <- trimws(unlist(strsplit(contrast, "_vs_")))
+        found <- any(sapply(df, function(col) {
+          col_vals <- trimws(tolower(as.character(col)))
+          all(tolower(parts) %in% col_vals)
+        }))
         if (!found) {
           messages <- c(messages, paste0("❌ No column found with both contrast values: ", paste(parts, collapse = " vs ")))
         }
       }
     }
-    if (length(messages) == 0) {
-      output$sample_validation_status <- renderText("✅ Sample sheet loaded and validated.")
-      report_ready(TRUE)
-    } else {
-      output$sample_validation_status <- renderText(paste(messages, collapse = "\n"))
-      report_ready(FALSE)
-    }
+    
+    has_error <- any(grepl("^❌", messages))
+    
+    output$sample_validation_status <- renderText(
+      if (has_error) paste(messages, collapse = "\n")
+      else paste(c(messages, "✅ Sample sheet loaded and validated."), collapse = "\n")
+    )
+    
+    report_ready(!has_error)
+    
   }
   observeEvent(input$validate_sheet, {
     validate_sample_sheet()
@@ -160,7 +182,13 @@ server <- function(input, output, session) {
     )
     if (!is.null(contrasts_path())) {
       params <- append(params, paste("--contrasts", dq(contrasts_path())))
+    } else if (!is.null(contrast_lines())) {
+      # Save entered text contrasts to a temp file
+      manual_contrasts_path <- file.path(tempdir(), paste0(input$seqID, "_manual_contrasts.txt"))
+      writeLines(contrast_lines(), manual_contrasts_path)
+      params <- append(params, paste("--contrasts", dq(manual_contrasts_path)))
     }
+    
     if (!is.null(input$nfcore_spikein_dir)) {
       params <- append(params, paste("--nfcore_spikein_dir", dq(input$nfcore_spikein_dir)))
     }
@@ -279,14 +307,13 @@ server <- function(input, output, session) {
       shinyjs::disable("run_report")
     }
   })
-  observe({
+  observeEvent(report_ready(), {
     if (report_ready()) {
       shinyjs::enable("generate_params")
     } else {
       shinyjs::disable("generate_params")
     }
-  })
-  
+  }, ignoreInit = FALSE)
   
   
   observeEvent(input$run_report, {
@@ -334,7 +361,9 @@ server <- function(input, output, session) {
     updateTextInput(session, "report_title", value = "")
     updateTextInput(session, "nfcore_spikein_dir", value = "")
     updateTextInput(session, "group_var", value = "")
-    updateTextInput(session, "contrasts", value = "")
+    updateTextInput(session, "contrasts_text", value = "")
+    updateTextInput(session, "contrasts", value = "")  # only if this was still named "contrasts"
+    updateTextInput(session, "seqID", value = "")
     updateTextInput(session, "seqID", value = "")
     updateTextInput(session, "sample_sheet", value = "")
     
@@ -374,3 +403,4 @@ server <- function(input, output, session) {
   })
   
 }
+

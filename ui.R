@@ -45,8 +45,13 @@ ui <- dashboardPage(
                   
                   textInput("report_title", "Report Title", value = "Differential Accessibility of Heat vs. Control in Mouse (QC-passed samples only)"),
                   textInput("group_var", "Group Variable", value = "Condition"),
-                  #textInput("contrasts", "Contrasts File (Required)", value = ""),
-                  fileInput("contrasts", "Upload Contrasts File (Required)", accept=".csv"),
+                  # In your UI layout
+                  fileInput("contrasts_file", "Upload Contrasts File (optional)", accept = ".csv"),
+                  textInput("contrasts_text", "Or Enter Contrasts (comma-separated)", 
+                            placeholder = "e.g., Group1_vs_Group2, Var1_vs_Var2"),
+                  helpText("You may either upload a plain text `.csv` file (no header, one contrast per line), ",
+                           "OR enter a comma-separated list of contrasts in the text box above. ",
+                           "The app will automatically detect the variable(s) used in each contrast."),
                   textInput("seqID", "Project ID", value = "NS4167_Male_GoodSamples"),
                   textInput("nfcore_spikein_dir", "Spike-in Dir (Optional. If not specified, TMM normalization will be performed.)", value = ""),
                   textOutput("sample_sheet_source"),
