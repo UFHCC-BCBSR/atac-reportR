@@ -1,3 +1,8 @@
 renv/library
 Dockerfile
 README_runapp.bash
+.Rprofile
+renv.lock
+renv/.gitignore
+renv/activate.R
+renv/settings.json
