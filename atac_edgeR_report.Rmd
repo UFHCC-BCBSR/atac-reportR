@@ -670,6 +670,7 @@ Sys.setenv(
 )
 system2("bash", args = "bash/build_ucsc_trackhub.sh")
 system2("bash", args ="bash/make_igv_zip.sh")
+}
 ```
 
 ```{r URLs,eval = !params$test_mode}
@@ -1096,6 +1097,3 @@ if (!is.null(kegg_results)) {
 [^1]: McCarthy DJ, Chen Y and Smyth GK (2012). Differential expression analysis of multifactor RNA-Seq experiments with respect to biological variation. Nucleic Acids Research 40, 4288-4297
 
 [^2]: Patel, H., Espinosa-Carrasco, J., Langer, B., Ewels, P., nf-core bot, Garcia, M. U., Syme, R., Peltzer, A., Talbot, A., Behrens, D., Gabernet, G., Jin, M., Hörtenhuber, M., Gonzalez Rodriguez, J., Menden, K., & An, Ö. (2022). nf-core/atacseq: 2.1.2. [GitHub repository]. https://github.com/nf-core/atacseq (accessed August 7, 2022).
-
-
-
