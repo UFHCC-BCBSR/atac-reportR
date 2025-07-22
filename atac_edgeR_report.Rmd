@@ -327,7 +327,7 @@ combined_plot <- subplot(
 combined_plot <- combined_plot %>%
   layout(title = pca_combined_title)
 
-combined_plot
+tagList(plotly::as_widget(combined_plot))
 ```
 
 ### Correlation Heatmaps
@@ -617,11 +617,24 @@ hsa_chrom_sizes="hg38.chrom.sizes"
 
 chrom_sizes_file <- if (report_params$organism == "mmu") mmu_chrom_sizes else hsa_chrom_sizes
 
+bedToBigBed_path <- Sys.which("bedToBigBed")
+
+if (bedToBigBed_path == "") {
+  # Check HiPerGator path if not found on PATH
+  alt_path <- "/apps/ucsc/20210803/bedToBigBed"
+  if (file.exists(alt_path)) {
+    bedToBigBed_path <- alt_path
+  } else {
+    stop("bedToBigBed not found on PATH or at /apps/ucsc/20210803/bedToBigBed")
+  }
+}
+
+
 write_bigbed_de_peaks(
   results_list = results_list,
   report_params = report_params,
   chrom_sizes_file = chrom_sizes_file,
-  bedToBigBed_path = "/apps/ucsc/20210803/bedToBigBed"
+  bedToBigBed_path = bedToBigBed_path
 )
 ```
 
