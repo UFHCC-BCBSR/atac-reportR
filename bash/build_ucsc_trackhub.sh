@@ -92,16 +92,16 @@ for group in "$GROUP1" "$GROUP2"; do
 
     for sample in $sample_list; do
       if [[ -n "${pipeline_output:-}" ]]; then
-        bw_path=$(find "$pipeline_output" -type f -path "*/bowtie2/merged_library/bigwig/*${sample}*.bigWig" 2>/dev/null || true)
+      bw_path=$(ls "$pipeline_output"/*${sample}*.bigWig 2>/dev/null || true)
       elif [[ -n "${path_to_bigwigs:-}" ]]; then
-        bw_path=$(ls "${path_to_bigwigs}"/*${sample}*.bigWig 2>/dev/null || true)
+      bw_path=$(ls "${path_to_bigwigs}"/*${sample}*.bigWig 2>/dev/null || true)
       fi
       bigwig_files="$bigwig_files $bw_path"
     done
   else
     echo "[WARN] group_sample_map not provided; falling back to wildcard search for group: $group"
     if [[ -n "${pipeline_output:-}" ]]; then
-      bigwig_files=$(find "$pipeline_output" -type f -path "*/bowtie2/merged_library/bigwig/*${group}*.bigWig" || true)
+      bigwig_files=$(ls "$pipeline_output"/*${group}*.bigWig 2>/dev/null || true)
     elif [[ -n "${path_to_bigwigs:-}" ]]; then
       bigwig_files=$(ls "${path_to_bigwigs}"/*${group}*.bigWig 2>/dev/null || true)
     else
@@ -136,7 +136,10 @@ done
 chmod -R o+rX "$TRACKHUB_DIR"
 
 # === Output final UCSC link ===
-echo
+# Ensure parent directories are also traversable
+chmod o+rx "$PUBLIC_WEB_DIR"
+chmod o+rx "$PUBLIC_WEB_DIR/$SEQID"
+
 echo "[SUCCESS] Trackhub deployed!"
 echo "UCSC Genome Browser Link:"
 

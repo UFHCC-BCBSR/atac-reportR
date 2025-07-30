@@ -40,9 +40,9 @@ summarize_atac_sample_qc <- function(dds, render_table = TRUE) {
   
   # === 1. OPEN BASES ===
   open_bases_df <- purrr::map_dfr(samples, function(sample) {
-    peak_file <- file.path(report_params$nfcore_output_dir,
-                           "bowtie2/merged_library/macs2/broad_peak",
-                           paste0(sample, ".mLb.clN_peaks.broadPeak"))
+    peak_file <- file.path(resolved_seq_dir, paste0(sample, ".mLb.clN_peaks.broadPeak"))
+    
+    
     
     if (file.exists(peak_file)) {
       peaks <- readr::read_tsv(peak_file, col_names = FALSE, col_types = readr::cols_only(
@@ -58,12 +58,8 @@ summarize_atac_sample_qc <- function(dds, render_table = TRUE) {
   
   # === 2. ALIGNED READS, PEAK COUNT, FACTOR ===
   summary_table <- purrr::map_dfr(samples, function(sample) {
-    flagstat_path <- file.path(report_params$nfcore_output_dir,
-                               "bowtie2/merged_library/samtools_stats",
-                               paste0(sample, ".mLb.clN.sorted.bam.flagstat"))
-    peaks_path <- file.path(report_params$nfcore_output_dir,
-                            "bowtie2/merged_library/macs2/broad_peak",
-                            paste0(sample, ".mLb.clN_peaks.broadPeak"))
+    flagstat_path <- file.path(resolved_seq_dir, paste0(sample, ".mLb.clN.sorted.bam.flagstat"))
+    peaks_path <- file.path(resolved_seq_dir, paste0(sample, ".mLb.clN_peaks.broadPeak"))
     
     aligned_reads <- readLines(flagstat_path) %>%
       stringr::str_subset("mapped \\(") %>%
@@ -82,9 +78,11 @@ summarize_atac_sample_qc <- function(dds, render_table = TRUE) {
   }) %>% dplyr::distinct()
   
   # === 3. FRIP SCORES ===
-  frip_raw <- readr::read_tsv(file.path(report_params$nfcore_output_dir,
-                                        "multiqc/broad_peak/multiqc_data/multiqc_mlib_frip_score-plot.txt"),
-                              col_names = TRUE)
+  # MultiQC FRiP raw
+  frip_raw <- readr::read_tsv(
+    file.path(resolved_seq_dir, "multiqc_mlib_frip_score-plot.txt"),
+    col_names = TRUE
+  )
   frip_df <- frip_raw %>%
     dplyr::rowwise() %>%
     dplyr::mutate(FRIP = as.numeric(dplyr::cur_data()[[Sample]])) %>%

@@ -46,12 +46,22 @@ library(downloadthis)
 select <- dplyr::select
 ```
 
-```{r parse params}
-if (exists("params") && !is.null(params$params_file)) {
-  report_params <- parse_params(params$params_file)
-} else {
-  #report_params <- parse_params("/blue/cancercenter-dept/PIPELINES/REPORTING/atacseq_report_module/param_files/testing/NS4167_Male_GoodSamples_params.txt")
-  stop("params$params_file is not available. This Rmd must be run with a params file.")
+```{r parse-params, include=FALSE}
+# Allow both interactive (manual) and app-driven rendering
+if (!exists("params") || is.null(params$params_file)) {
+  message("Running interactively — setting default params file manually")
+  params <- list(
+    params_file = params_path,
+    report_title = "Test Report",
+    test_mode = TRUE
+  )
+}
+
+report_params <- parse_params(params$params_file)
+
+resolved_seq_dir <- Sys.glob(file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID))[1]
+if (is.na(resolved_seq_dir) || !dir.exists(resolved_seq_dir)) {
+  stop("ATAC directory for seqID not found: ", report_params$seqID)
 }
 ```
 
@@ -114,7 +124,16 @@ if (url == "") {
 
 ```{r load data}
 # Load target genome data
-load(paste0(report_params$nfcore_output_dir, "/bowtie2/merged_library/macs2/broad_peak/consensus/deseq2/consensus_peaks.mLb.clN.dds.RData"))
+rdata_path <- Sys.glob(
+  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.dds.RData")
+)[1]
+
+if (!is.na(rdata_path) && file.exists(rdata_path)) {
+  load(rdata_path)
+  # RData variables now available in environment
+} else {
+  stop("❌ consensus_peaks.mLb.clN.dds.RData file could not be found for seqID: ", report_params$seqID)
+}
 targetGenome_dds <- dds
 rm(dds)
 # Extract counts immediately
@@ -308,7 +327,7 @@ combined_plot <- subplot(
 combined_plot <- combined_plot %>%
   layout(title = pca_combined_title)
 
-combined_plot
+tagList(plotly::as_widget(combined_plot))
 ```
 
 ### Correlation Heatmaps
@@ -350,7 +369,15 @@ pheatmap(cor_norm, main = paste0("Sample Correlation - ", norm_method_title))
 
 ```{r annotate consensus peaks}
 # === 1. Load and format annotated consensus peaks ===
-peaks_anno <- read.delim(paste0(report_params$nfcore_output_dir,"bowtie2/merged_library/macs2/broad_peak/consensus/consensus_peaks.mLb.clN.annotatePeaks.txt"))
+anno_path <- Sys.glob(
+  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID, "consensus_peaks.mLb.clN.annotatePeaks.txt")
+)[1]
+
+if (!is.na(anno_path) && file.exists(anno_path)) {
+  peaks_anno <- read.delim(anno_path)
+} else {
+  stop("❌ consensus_peaks.mLb.clN.annotatePeaks.txt file could not be found for seqID: ", report_params$seqID)
+}
 
 colnames(peaks_anno)[[1]] <- "interval"
 
@@ -590,11 +617,24 @@ hsa_chrom_sizes="hg38.chrom.sizes"
 
 chrom_sizes_file <- if (report_params$organism == "mmu") mmu_chrom_sizes else hsa_chrom_sizes
 
+bedToBigBed_path <- Sys.which("bedToBigBed")
+
+if (bedToBigBed_path == "") {
+  # Check HiPerGator path if not found on PATH
+  alt_path <- "/apps/ucsc/20210803/bedToBigBed"
+  if (file.exists(alt_path)) {
+    bedToBigBed_path <- alt_path
+  } else {
+    stop("bedToBigBed not found on PATH or at /apps/ucsc/20210803/bedToBigBed")
+  }
+}
+
+
 write_bigbed_de_peaks(
   results_list = results_list,
   report_params = report_params,
   chrom_sizes_file = chrom_sizes_file,
-  bedToBigBed_path = "/apps/ucsc/20210803/bedToBigBed"
+  bedToBigBed_path = bedToBigBed_path
 )
 ```
 
@@ -635,20 +675,25 @@ group_sample_map <- paste(group_sample_map, collapse = " ")
   bb_path <- file.path(trackhub_dir, paste0(contrast_clean, "_DA_peaks.bb"))
   if (!file.exists(bb_path)) next
    # Set the environment variables in the system call
-  Sys.setenv(pipeline_output = report_params$nfcore_output_dir, 
-           contrast = contrast_clean, 
-           seqID = report_params$seqID, 
-           organism = report_params$organism,
-           bb_path = bb_path,
-           group_sample_map = group_sample_map)
+pipeline_output <- Sys.glob(
+  file.path("/blue/cancercenter-dept/privapps/data/atac", "*", report_params$seqID))[1]
+if (is.na(pipeline_output) || !dir.exists(pipeline_output)) stop("Could not find pipeline output dir for seqID: ", report_params$seqID)
 
-  system2("bash", args = "bash/build_ucsc_trackhub.sh")
-  system2("bash", args ="bash/make_igv_zip.sh")
+Sys.setenv(
+  pipeline_output = pipeline_output,
+  contrast = contrast_clean,
+  seqID = report_params$seqID,
+  organism = report_params$organism,
+  bb_path = bb_path,
+  group_sample_map = group_sample_map
+)
+system2("bash", args = "bash/build_ucsc_trackhub.sh")
+system2("bash", args ="bash/make_igv_zip.sh")
 }
 ```
 
 ```{r URLs,eval = !params$test_mode}
-trackhub_base_url <- "https://data.rc.ufl.edu/pub/cancercenter-dept/BCB-SR"
+trackhub_base_url <- "http://data.rc.ufl.edu/pub/cancercenter-dept/BCB-SR"
 
 hub_links <- setNames(vector("character", length(results_list)), names(results_list))
 igv_links <- setNames(vector("character", length(results_list)), names(results_list))
@@ -1071,6 +1116,3 @@ if (!is.null(kegg_results)) {
 [^1]: McCarthy DJ, Chen Y and Smyth GK (2012). Differential expression analysis of multifactor RNA-Seq experiments with respect to biological variation. Nucleic Acids Research 40, 4288-4297
 
 [^2]: Patel, H., Espinosa-Carrasco, J., Langer, B., Ewels, P., nf-core bot, Garcia, M. U., Syme, R., Peltzer, A., Talbot, A., Behrens, D., Gabernet, G., Jin, M., Hörtenhuber, M., Gonzalez Rodriguez, J., Menden, K., & An, Ö. (2022). nf-core/atacseq: 2.1.2. [GitHub repository]. https://github.com/nf-core/atacseq (accessed August 7, 2022).
-
-
-

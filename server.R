@@ -8,17 +8,20 @@ server <- function(input, output, session) {
   params_generated <- reactiveVal(FALSE)
   host_appdir <- Sys.getenv("HOST_APPDIR")
   if (host_appdir == "") host_appdir <- getwd()  # fallback if unset
-  
-  
+  data_dir <- reactive({
+    req(input$seqID)
+    Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID))
+  })  
   output$sample_sheet_source <- renderText({
+    req(input$seqID)
     if (!is.null(sample_sheet_path())) {
       return(paste("✅ Using uploaded sample sheet:", sample_sheet_path()))
     } else if (!is.null(input$sample_sheet) && file.exists(input$sample_sheet)) {
       return(paste("✅ Using sample sheet from text field:", input$sample_sheet))
-    } else if (!is.null(input$nfcore_output_dir)) {
-      fallback <- file.path(input$nfcore_output_dir, "pipeline_info/samplesheet.valid.csv")
-      if (file.exists(fallback)) {
-        return(paste("✅ Using fallback sample sheet from nf-core output dir:", fallback))
+    } else {
+      fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      if (!is.na(fallback) && file.exists(fallback)) {
+        return(paste("✅ Using fallback sample sheet from derived path:", fallback))
       }
     }
     return("❌ No valid sample sheet found.")
@@ -38,6 +41,33 @@ server <- function(input, output, session) {
       write.csv(df, file, row.names = FALSE)
     }
   )
+  # Store contrasts
+  contrasts_path <- reactiveVal(NULL)
+  contrast_lines <- reactiveVal(NULL)
+  
+  observeEvent(input$contrasts_file, {
+    req(input$contrasts_file)
+    dest <- file.path(data_dir(), paste0(input$seqID, "_contrasts.csv"))
+    file.copy(input$contrasts_file$datapath, dest, overwrite = TRUE)
+    contrasts_path(dest)
+    
+    lines <- trimws(readLines(dest, warn = FALSE))
+    lines <- lines[lines != ""]
+    
+    contrast_lines(lines)
+    validate_sample_sheet()  # ✅ Trigger validation here too
+  })
+  
+  
+  observeEvent(input$contrasts_text, {
+    if (nzchar(input$contrasts_text)) {
+      text_lines <- unlist(strsplit(input$contrasts_text, ",\\s*"))
+      contrast_lines(trimws(text_lines))
+      contrasts_path(NULL)  # Clear file path if using manual input
+      validate_sample_sheet()  # ✅ Run validation after contrast entry
+    }
+  })
+  
   
   
   sample_sheet_data <- reactive({
@@ -54,82 +84,82 @@ server <- function(input, output, session) {
     }
     
     # Priority 3: fallback from nf-core output dir
-    if (!is.null(input$nfcore_output_dir) && input$nfcore_output_dir != "") {
-      fallback <- file.path(input$nfcore_output_dir, "pipeline_info/samplesheet.valid.csv")
-      if (file.exists(fallback)) {
-        return(read.csv(fallback, stringsAsFactors = FALSE))
-      }
+    fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+    if (!is.na(fallback) && file.exists(fallback)) {
+      return(read.csv(fallback, stringsAsFactors = FALSE))
     }
     
     return(NULL)
   })
   
   
-  observeEvent(input$validate_sheet, {
+  validate_sample_sheet <- function() {
     df <- tryCatch(sample_sheet_data(), error = function(e) NULL)
-    
     if (is.null(df)) {
       output$sample_validation_status <- renderText("❌ No sample sheet available from upload, params file, or nf-core output.")
+      report_ready(FALSE)
       return()
     }
-    
     messages <- c()
-    
     if (!"sample_id" %in% colnames(df)) {
       messages <- c(messages, "⚠️ No 'sample_id' column found. The 'sample' column will be used instead.")
     }
-    
-    contrast_lines <- NULL
-    if (!is.null(input$contrasts) && file.exists(input$contrasts)) {
-      contrast_lines <- trimws(readLines(input$contrasts, warn = FALSE))
-      contrast_lines <- contrast_lines[contrast_lines != ""]
-    } else if (!is.null(input$contrasts) && input$contrasts != "") {
-      contrast_lines <- unlist(strsplit(input$contrasts, ",\\s*"))
-    }
-    
-    if (!is.null(contrast_lines) && length(contrast_lines) > 0) {
-      for (contrast in contrast_lines) {
-        parts <- unlist(strsplit(contrast, "_vs_"))
-        found <- any(sapply(df, function(col) all(parts %in% unique(col))))
+    lines <- contrast_lines()
+    if (!is.null(lines) && length(lines) > 0) {
+      for (contrast in lines) {
+        parts <- trimws(unlist(strsplit(contrast, "_vs_")))
+        found <- any(sapply(df, function(col) {
+          col_vals <- trimws(tolower(as.character(col)))
+          all(tolower(parts) %in% col_vals)
+        }))
         if (!found) {
           messages <- c(messages, paste0("❌ No column found with both contrast values: ", paste(parts, collapse = " vs ")))
         }
       }
     }
     
-    if (length(messages) == 0) {
-      output$sample_validation_status <- renderText("✅ Sample sheet loaded and validated.")
-    } else {
-      output$sample_validation_status <- renderText(paste(messages, collapse = "\n"))
-    }
-    if (length(messages) == 0) {
-      report_ready(TRUE)
-    } else {
-      report_ready(FALSE)
-    }
+    has_error <- any(grepl("^❌", messages))
     
+    output$sample_validation_status <- renderText(
+      if (has_error) paste(messages, collapse = "\n")
+      else paste(c(messages, "✅ Sample sheet loaded and validated."), collapse = "\n")
+    )
+    
+    report_ready(!has_error)
+    
+  }
+  observeEvent(input$validate_sheet, {
+    validate_sample_sheet()
   })
+  
   
   observeEvent(input$upload_sample_sheet, {
     tryCatch({
       req(input$upload_sample_sheet)
       df <- read.csv(input$upload_sample_sheet$datapath, stringsAsFactors = FALSE)
-      tmp_dir <- file.path(host_appdir, "edited_samplesheets")
-      dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-      path <- file.path(tmp_dir, paste0(input$seqID, "_sample_sheet.csv"))
+      path <- file.path(data_dir(), paste0(input$seqID, "edited_sample_sheet.csv"))
       write.csv(df, path, row.names = FALSE)
       sample_sheet_path(path)
       report_ready(FALSE)
+      validate_sample_sheet() # << automatically validate the new upload!
     }, error = function(e) {
       output$sample_validation_status <- renderText(paste("❌ Error uploading sample sheet:", e$message))
     })
+  })
+  observe({
+    # This will trigger when sample_sheet_path() and input$seqID change
+    if (is.null(sample_sheet_path())) {
+      fallback <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      if (!is.na(fallback) && file.exists(fallback)) {
+        validate_sample_sheet()
+      }
+    }
   })
   
   generate_param_lines <- function(input) {
     params <- list(
       paste("--report_title", dq(input$report_title)),
       paste("--group_var", dq(input$group_var)),
-      paste("--contrasts", dq(input$contrasts)),
       paste("--organism", dq(input$organism)),
       paste("--annotation_db", dq(input$annotation_db)),
       paste("--PI", dq(input$PI)),
@@ -145,20 +175,32 @@ server <- function(input, output, session) {
       paste("--Report_Reviewed_By", dq(input$Report_Reviewed_By)),
       paste("--raw_seq_URL", dq(input$raw_seq_URL)),
       paste("--multiqc_url", dq(input$multiqc_url)),
-      paste("--nfcore_output_dir", dq(input$nfcore_output_dir)),
       paste("--seqID", dq(input$seqID)),
       paste("--min_count_for_filtering", dq(input$min_count_for_filtering)),
       paste("--min_prop_for_filtering", dq(input$min_prop_for_filtering)),
       paste("--test_mode", dq(ifelse(input$test_mode, "TRUE", "FALSE")))
     )
+    if (!is.null(contrasts_path())) {
+      params <- append(params, paste("--contrasts", dq(contrasts_path())))
+    } else if (!is.null(contrast_lines())) {
+      # Save entered contrasts to a persistent file in the output dir
+      manual_contrasts_path <- file.path(data_dir(), paste0(input$seqID, "_manual_contrasts.txt"))
+      writeLines(contrast_lines(), manual_contrasts_path)
+      contrasts_path(manual_contrasts_path)  # update the reactiveVal for consistency
+      params <- append(params, paste("--contrasts", dq(manual_contrasts_path)))
+    }
+    
+    
     if (!is.null(input$nfcore_spikein_dir)) {
       params <- append(params, paste("--nfcore_spikein_dir", dq(input$nfcore_spikein_dir)))
     }
     if (!is.null(sample_sheet_path())) {
       params <- append(params, paste("--sample_sheet", dq(sample_sheet_path())))
     } else if (input$sample_sheet == "" || is.null(input$sample_sheet)) {
-      fallback_path <- file.path(input$nfcore_output_dir, "pipeline_info/samplesheet.valid.csv")
-      params <- append(params, paste("--sample_sheet", dq(fallback_path)))
+      fallback_path <- Sys.glob(file.path('/blue/cancercenter-dept/privapps/data/atac', '*', input$seqID, 'samplesheet.valid.csv'))[1]
+      if (!is.na(fallback_path) && file.exists(fallback_path)) {
+        params <- append(params, paste("--sample_sheet", dq(fallback_path)))
+      }
     }
     return(params)
   }
@@ -186,9 +228,7 @@ server <- function(input, output, session) {
       }
       current_params(param_data)
       
-      params_outdir <- file.path(host_appdir, "param_files")
-      dir.create(params_outdir, recursive = TRUE, showWarnings = FALSE)
-      params_path <- file.path(params_outdir, paste0(input$seqID, "_params.txt"))
+      params_path <- file.path(data_dir(), paste0(input$seqID, "_params.txt"))
       params_path_global(params_path)
       writeLines(unlist(params), params_path)
       
@@ -251,7 +291,6 @@ server <- function(input, output, session) {
       updateTextInput(session, "Report_Reviewed_By", value = param_list$Report_Reviewed_By)
       updateTextInput(session, "raw_seq_URL", value = param_list$raw_seq_URL)
       updateTextInput(session, "multiqc_url", value = param_list$multiqc_url)
-      updateTextInput(session, "nfcore_output_dir", value = param_list$nfcore_output_dir)
       updateTextInput(session, "nfcore_spikein_dir", value = param_list$nfcore_spikein_dir)
       updateNumericInput(session, "min_count_for_filtering", value = as.numeric(param_list$min_count_for_filtering))
       updateNumericInput(session, "min_prop_for_filtering", value = as.numeric(param_list$min_prop_for_filtering))
@@ -270,14 +309,13 @@ server <- function(input, output, session) {
       shinyjs::disable("run_report")
     }
   })
-  observe({
+  observeEvent(report_ready(), {
     if (report_ready()) {
       shinyjs::enable("generate_params")
     } else {
       shinyjs::disable("generate_params")
     }
-  })
-  
+  }, ignoreInit = FALSE)
   
   
   observeEvent(input$run_report, {
@@ -288,10 +326,7 @@ server <- function(input, output, session) {
         if (is.null(params_path) || !file.exists(params_path)) {
           stop("Params file not found. Please click 'Generate Params File' first.")
         }
-        
-        report_dir <- file.path(host_appdir, "reports")
-        dir.create(report_dir, showWarnings = FALSE, recursive = TRUE)
-        report_path <- file.path(report_dir, paste0(input$seqID, ".Report.html"))
+        report_path <- file.path(data_dir(), paste0(input$seqID, ".Report.html"))
         
         incProgress(0.6, detail = "Rendering R Markdown...")
         rmarkdown::render(
@@ -326,10 +361,11 @@ server <- function(input, output, session) {
   observeEvent(input$clear_params, {
     # Reset all inputs
     updateTextInput(session, "report_title", value = "")
-    updateTextInput(session, "nfcore_output_dir", value = "")
     updateTextInput(session, "nfcore_spikein_dir", value = "")
     updateTextInput(session, "group_var", value = "")
-    updateTextInput(session, "contrasts", value = "")
+    updateTextInput(session, "contrasts_text", value = "")
+    updateTextInput(session, "contrasts", value = "")  # only if this was still named "contrasts"
+    updateTextInput(session, "seqID", value = "")
     updateTextInput(session, "seqID", value = "")
     updateTextInput(session, "sample_sheet", value = "")
     
@@ -369,3 +405,4 @@ server <- function(input, output, session) {
   })
   
 }
+

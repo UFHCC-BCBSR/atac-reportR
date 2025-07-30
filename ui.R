@@ -42,14 +42,19 @@ ui <- dashboardPage(
                   actionButton("clear_params", "Reset Params", class = "btn btn-outline-danger btn-block"),
                   tags$h4("Analysis Parameters"),
                   helpText("These fields are required to generate the report. Please ensure contrast groups and project ID are accurate."),
-                  
-                  textInput("report_title", "Report Title", value = "Differential Accessibility of Heat vs. Control in Mouse (QC-passed samples only)"),
-                  textInput("nfcore_output_dir", "nf-core Output Dir", value = "/blue/cancercenter-dept/hkates/Projects_2025_Feb-May/Clanton/Male/GoodSamples_OUTPUT/"),
-                  textInput("group_var", "Group Variable", value = "Condition"),
-                  textInput("contrasts", "Contrasts File (Required)", value = "/blue/cancercenter-dept/PIPELINES/REPORTING/atacseq_report_module/contrast_files/example_contrasts.txt"),
                   textInput("seqID", "Project ID", value = "NS4167_Male_GoodSamples"),
+                  helpText("Project ID must exactly match the directory in /blue where your atac-seq results are",
+                           "See the 'About' page for more details"),
+                  textInput("report_title", "Report Title", value = "Differential Accessibility of Heat vs. Control in Mouse (QC-passed samples only)"),
+                  textInput("group_var", "Group Variable (must not be 'group')", value = "Condition"),
+                  # In your UI layout
+                  fileInput("contrasts_file", "Upload Contrasts File (optional)", accept = ".csv"),
+                  textInput("contrasts_text", "Or Enter Contrasts (comma-separated)", 
+                            placeholder = "e.g., Group1_vs_Group2, Var1_vs_Var2"),
+                  helpText("You may either upload a plain text `.csv` file (no header, one contrast per line), ",
+                           "OR enter a comma-separated list of contrasts in the text box above. ",
+                           "The app will automatically detect the variable(s) used in each contrast."),
                   textInput("nfcore_spikein_dir", "Spike-in Dir (Optional. If not specified, TMM normalization will be performed.)", value = ""),
-                  textInput("sample_sheet", "Path to sample sheet CSV (Optional. If not specified, the sample sheet in your nf-core output dir will be used)", value = ""),
                   textOutput("sample_sheet_source"),
                   downloadButton("download_sample_sheet", "Download and Edit Sample Information (Optional)", class = "btn-secondary btn-sm"),
                   fileInput("upload_sample_sheet", "Upload and Save Edited Sample Sheet (Optional)", accept = ".csv"),
@@ -110,6 +115,19 @@ ui <- dashboardPage(
                 
                 h3("How to Use"),
                 tags$ol(
+                  tags$li(
+                    tagList(
+                      "Navigate to ",
+                      tags$code("/blue/cancercenter-dept/privapps/data/atac"),
+                      " and run:",
+                      tags$br(),
+                      tags$code("bash retrieve-atac-results.bash --output <your_nf-core/atacseq outdir> --destination /blue/cancercenter-dept/privapps/data/atac/<your_PI>/<Project ID>"),
+                      tags$br(),
+                      "to copy your nf-core/atacseq output to the directory accessible to this app.",
+                      tags$br(),
+                      "Project ID must exactly match the Project ID value entered in the app (PI can be anything, but it must exist; Project ID must be a subdirectory of PI)"
+                    )
+                  ),
                   tags$li("Upload a pre-configured parameters file or manually fill out the form."),
                   tags$li("Optionally download, edit, and re-upload a sample sheet to customize sample names or replicates."),
                   tags$li("Validate your sample sheet to ensure contrasts can be tested."),
