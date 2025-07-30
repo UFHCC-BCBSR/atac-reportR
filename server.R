@@ -183,11 +183,13 @@ server <- function(input, output, session) {
     if (!is.null(contrasts_path())) {
       params <- append(params, paste("--contrasts", dq(contrasts_path())))
     } else if (!is.null(contrast_lines())) {
-      # Save entered text contrasts to a temp file
-      manual_contrasts_path <- file.path(tempdir(), paste0(input$seqID, "_manual_contrasts.txt"))
+      # Save entered contrasts to a persistent file in the output dir
+      manual_contrasts_path <- file.path(data_dir(), paste0(input$seqID, "_manual_contrasts.txt"))
       writeLines(contrast_lines(), manual_contrasts_path)
+      contrasts_path(manual_contrasts_path)  # update the reactiveVal for consistency
       params <- append(params, paste("--contrasts", dq(manual_contrasts_path)))
     }
+    
     
     if (!is.null(input$nfcore_spikein_dir)) {
       params <- append(params, paste("--nfcore_spikein_dir", dq(input$nfcore_spikein_dir)))
