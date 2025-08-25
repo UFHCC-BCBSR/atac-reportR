@@ -27,7 +27,7 @@ https://github.com/UFHCC-BCBSR/atac-reportR.git
 cd atac-reportR
 ```
 
-### 2. : Connect to reserver to use Rstudio on HiPerGator (in a dev session or with SLURM sbatch)
+### 2. Connect to reserver to use Rstudio on HiPerGator (in a dev session or with SLURM sbatch)
 
 ```bash
 moduler load R
@@ -36,7 +36,7 @@ rserver
 
 For help with this, see https://docs.rc.ufl.edu/software/apps/r/rstudio_server/
 
-### 3. : Use "Run App" to run the app
+### 3. Use "Run App" to run the app
 ---
 
 ## 📝 Sample Sheet and Parameters
