@@ -22,29 +22,25 @@ To run the app, you'll need:
 
 ---
 
-## How to Use It
+## How to Use it on Hipergator (for development etc.)
 
 ### 1. Clone this repository anywhere on HiPerGator:
+
 ```bash
-git clone https://github.com/HeatherKates/atacReportApp.git
-cd atacReportApp
+https://github.com/UFHCC-BCBSR/atac-reportR.git
+cd atac-reportR
 ```
 
-### 2. Submit the job:
+### 2. : Connect to reserver to use Rstudio on HiPerGator (in a dev session or with SLURM sbatch)
+
 ```bash
-sbatch run_atac_apptainer.sbatch
+moduler load R
+rserver
 ```
 
-This will:
+For help with this, see https://docs.rc.ufl.edu/software/apps/r/rstudio_server/
 
-- Launch the app on a compute node
-- Print SSH tunneling instructions in the *out file like:
-  ```
-  ssh -N -L 7291:c1234:7291 yourGatorUser@hpg.rc.ufl.edu
-  ```
-- Allow you to access the app at:  
-  http://localhost:7291
-
+### 3. : Use "Run App" to run the app
 ---
 
 ## 📝 Sample Sheet and Parameters
@@ -70,20 +66,6 @@ This app runs entirely inside a container built from:
 - R + Bioconductor packages
 - Shiny + bs4Dash
 - The `atac_edgeR_report.Rmd` analysis script
-
-The container is mounted via `apptainer` and does **not require any installation of R or packages on HiPerGator**.
-
----
-
-## 🛠 Troubleshooting
-
-If you get a message about missing access to the `.sif` file, ensure your HiPerGator account has permission to read from:
-
-```
-/blue/cancercenter-dept/CONTAINERS/atacseq_app.sif
-```
-
-Contact hkates@ufl.edu if access needs to be granted.
 
 ---
 
