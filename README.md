@@ -14,12 +14,8 @@ Optional fields allow the report to be customized for your project.
 To run the app, you'll need:
 
 - Access to **HiPerGator**
-- Output from an `nf-core/atacseq` run on HiPerGator
-- Read access to the prebuilt container image (SIF file):  
-  ```
-  /blue/cancercenter-dept/CONTAINERS/atacseq_app.sif
-  ```
-
+- Output from an `nf-core/atacseq` run on HiPerGator copied to `/blue/cancercenter-dept/privapps/data/atac/<seqID>`:
+	- To copy files, do `bash /blue/cancercenter-dept/privapps/data/atac/retrieve-atac-results.bash --output <nfcore-output-dir> --destination /blue/cancercenter-dept/privapps/data/atac/<seqID>`
 ---
 
 ## How to Use it on Hipergator (for development etc.)
