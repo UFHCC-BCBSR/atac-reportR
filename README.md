@@ -21,22 +21,28 @@ To run the app, you'll need:
 This will copy the following files that the app reads:
 
 ```ls clanton/NS4167_Male_GoodSamples/
-
 consensus_peaks.mLb.clN.annotatePeaks.txt
 consensus_peaks.mLb.clN.dds.RData
 Control_REP1.mLb.clN.bigWig
+Control_REP1.mLb.clN_peaks.broadPeak
 Control_REP1.mLb.clN.sorted.bam.flagstat
 Control_REP2.mLb.clN.bigWig
+Control_REP2.mLb.clN_peaks.broadPeak
 Control_REP2.mLb.clN.sorted.bam.flagstat
 Control_REP3.mLb.clN.bigWig
+Control_REP3.mLb.clN_peaks.broadPeak
 Control_REP3.mLb.clN.sorted.bam.flagstat
 Heat_REP1.mLb.clN.bigWig
+Heat_REP1.mLb.clN_peaks.broadPeak
 Heat_REP1.mLb.clN.sorted.bam.flagstat
 Heat_REP2.mLb.clN.bigWig
+Heat_REP2.mLb.clN_peaks.broadPeak
 Heat_REP2.mLb.clN.sorted.bam.flagstat
 Heat_REP3.mLb.clN.bigWig
+Heat_REP3.mLb.clN_peaks.broadPeak
 Heat_REP3.mLb.clN.sorted.bam.flagstat
 Heat_REP4.mLb.clN.bigWig
+Heat_REP4.mLb.clN_peaks.broadPeak
 Heat_REP4.mLb.clN.sorted.bam.flagstat
 multiqc_mlib_frip_score-plot.txt
 samplesheet.valid.csv
