@@ -16,6 +16,31 @@ To run the app, you'll need:
 - Access to **HiPerGator**
 - Output from an `nf-core/atacseq` run on HiPerGator copied to `/blue/cancercenter-dept/privapps/data/atac/<seqID>`:
 	- To copy files, do `bash /blue/cancercenter-dept/privapps/data/atac/retrieve-atac-results.bash --output <nfcore-output-dir> --destination /blue/cancercenter-dept/privapps/data/atac/<seqID>`
+
+
+This will copy the following files that the app reads:
+
+```ls clanton/NS4167_Male_GoodSamples/
+
+consensus_peaks.mLb.clN.annotatePeaks.txt
+consensus_peaks.mLb.clN.dds.RData
+Control_REP1.mLb.clN.bigWig
+Control_REP1.mLb.clN.sorted.bam.flagstat
+Control_REP2.mLb.clN.bigWig
+Control_REP2.mLb.clN.sorted.bam.flagstat
+Control_REP3.mLb.clN.bigWig
+Control_REP3.mLb.clN.sorted.bam.flagstat
+Heat_REP1.mLb.clN.bigWig
+Heat_REP1.mLb.clN.sorted.bam.flagstat
+Heat_REP2.mLb.clN.bigWig
+Heat_REP2.mLb.clN.sorted.bam.flagstat
+Heat_REP3.mLb.clN.bigWig
+Heat_REP3.mLb.clN.sorted.bam.flagstat
+Heat_REP4.mLb.clN.bigWig
+Heat_REP4.mLb.clN.sorted.bam.flagstat
+multiqc_mlib_frip_score-plot.txt
+samplesheet.valid.csv```
+
 ---
 
 ## How to Use it on Hipergator (for development etc.)
