@@ -39,7 +39,8 @@ Heat_REP3.mLb.clN.sorted.bam.flagstat
 Heat_REP4.mLb.clN.bigWig
 Heat_REP4.mLb.clN.sorted.bam.flagstat
 multiqc_mlib_frip_score-plot.txt
-samplesheet.valid.csv```
+samplesheet.valid.csv
+```
 
 ---
 
